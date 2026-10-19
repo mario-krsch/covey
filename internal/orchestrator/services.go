@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -45,10 +46,52 @@ import (
 // mean different things to it: what it may now talk to, what this file does not
 // offer it, and what its organisation does not allow. Only the third is
 // somebody else's decision to change.
+//
+// State is "ready" when the host has answered, and "provisioning" when it has
+// not answered within serviceAnswerWait (#603). Pending then names what is
+// still coming up, and services_status reports the outcome.
 type serviceResult struct {
+	State   string                `json:"state"`
 	Started []sandbox.ServiceRun  `json:"started"`
+	Pending []string              `json:"pending,omitempty"`
 	Skipped []sandbox.ComposeSkip `json:"skipped,omitempty"`
 	Refused []serviceRefusal      `json:"refused,omitempty"`
+	Hint    string                `json:"hint,omitempty"`
+}
+
+// serviceAnswerWait is how long start_services waits for the host before it
+// answers "provisioning". The daemon gives every request to the control plane
+// 30 seconds (internal/daemon/daemon.go), and a cold image pull takes longer
+// than that; an answer after the deadline reaches nobody, while the services
+// come up all the same (#603). So the start goes on in the background and the
+// agent asks again. The wait is also how long the job's message loop stands
+// still for this request — bounded, and well below the deadline.
+var serviceAnswerWait = 20 * time.Second
+
+// provisioningHint is what the agent reads with a "provisioning" answer.
+const provisioningHint = "the host is still bringing these services up (an image pull can take minutes). " +
+	"Ask with covey/services_status until state is ready or failed; do not send the compose file again."
+
+// serviceProvision is one start_services that went to the host. It outlives the
+// request that started it: the host answers whenever the pull is done, and the
+// result is kept on the session for services_status.
+type serviceProvision struct {
+	since   time.Time
+	pending []string
+	done    chan struct{}
+
+	// Set before done is closed, read only after.
+	started []sandbox.ServiceRun
+	err     error
+}
+
+func (p *serviceProvision) finished() bool {
+	select {
+	case <-p.done:
+		return true
+	default:
+		return false
+	}
 }
 
 type serviceRefusal struct {
@@ -120,29 +163,110 @@ func (o *Orchestrator) startServices(
 		allowed = wanted
 	}
 
-	result := serviceResult{Skipped: skipped, Refused: refused}
-	if len(allowed) > 0 {
-		starter, canStart := o.sandboxOf(agent.ID).(ServiceStarter)
-		if !canStart {
-			return fail("this sandbox cannot take services while it runs")
-		}
-		started, err := starter.StartServices(ctx, allowed)
+	result := serviceResult{State: "ready", Started: []sandbox.ServiceRun{}, Skipped: skipped, Refused: refused}
+	if len(allowed) == 0 {
+		o.recordServiceRequest(ctx, agent, taskID, "started", nil, refused, nil)
+		return ok(result)
+	}
+	starter, canStart := o.sandboxOf(agent.ID).(ServiceStarter)
+	if !canStart {
+		return fail("this sandbox cannot take services while it runs")
+	}
+
+	// One start at a time per sandbox. A second request while the first is
+	// still pulling is almost always the agent retrying after a timeout; it
+	// gets the state of the first rather than a second pull of the same image.
+	o.mu.Lock()
+	sess := o.sessions[agent.ID]
+	if sess != nil && sess.provision != nil && !sess.provision.finished() {
+		p := sess.provision
+		o.mu.Unlock()
+		result.State = "provisioning"
+		result.Pending = p.pending
+		result.Hint = provisioningHint
+		return ok(result)
+	}
+	p := &serviceProvision{since: time.Now(), done: make(chan struct{})}
+	for _, svc := range allowed {
+		p.pending = append(p.pending, svc.Name)
+	}
+	if sess != nil {
+		sess.provision = p
+	}
+	o.mu.Unlock()
+
+	// Detached from the request: the request may give up waiting, the start
+	// does not. The host bounds it with its own start timeout.
+	bg := context.WithoutCancel(ctx)
+	go func() {
+		started, err := starter.StartServices(bg, allowed)
 		if err != nil {
 			// Recorded even in failure: an agent that could not get its
 			// database is the most common reason for a run that reads like the
 			// project is broken.
-			o.recordServiceRequest(ctx, agent, taskID, "failed", nil, refused, err)
-			return fail("%v", err)
+			o.recordServiceRequest(bg, agent, taskID, "failed", nil, refused, err)
+		} else {
+			o.mu.Lock()
+			if s := o.sessions[agent.ID]; s != nil {
+				s.services = append(s.services, started...)
+			}
+			o.mu.Unlock()
+			o.recordServiceRequest(bg, agent, taskID, "started", started, refused, nil)
 		}
-		result.Started = started
-		o.mu.Lock()
-		if s := o.sessions[agent.ID]; s != nil {
-			s.services = append(s.services, started...)
+		p.started, p.err = started, err
+		close(p.done)
+	}()
+
+	select {
+	case <-p.done:
+		if p.err != nil {
+			return fail("%v", p.err)
 		}
-		o.mu.Unlock()
+		result.Started = p.started
+		return ok(result)
+	case <-time.After(serviceAnswerWait):
+	case <-ctx.Done():
 	}
-	o.recordServiceRequest(ctx, agent, taskID, "started", result.Started, refused, nil)
+	result.State = "provisioning"
+	result.Pending = p.pending
+	result.Hint = provisioningHint
 	return ok(result)
+}
+
+// servicesStatus serves covey/services_status: what stands beside the sandbox
+// now, and how the last start_services went. It is the second half of a start
+// that answered "provisioning" (#603).
+func (o *Orchestrator) servicesStatus(
+	agent agents.Agent, ok func(any) daemon.InjectHiring, fail func(string, ...any) daemon.InjectHiring,
+) daemon.InjectHiring {
+	o.mu.Lock()
+	sess := o.sessions[agent.ID]
+	if sess == nil {
+		o.mu.Unlock()
+		return fail("no sandbox is running for this agent")
+	}
+	running := slices.Clone(sess.services)
+	p := sess.provision
+	o.mu.Unlock()
+
+	out := map[string]any{"state": "ready", "services": running}
+	if running == nil {
+		out["services"] = []sandbox.ServiceRun{}
+	}
+	if p == nil {
+		return ok(out)
+	}
+	out["since"] = p.since.UTC().Format(time.RFC3339)
+	switch {
+	case !p.finished():
+		out["state"] = "provisioning"
+		out["pending"] = p.pending
+		out["waited_seconds"] = int(time.Since(p.since).Seconds())
+	case p.err != nil:
+		out["state"] = "failed"
+		out["error"] = p.err.Error()
+	}
+	return ok(out)
 }
 
 // sandboxOf is the sandbox of a running session, or nil.

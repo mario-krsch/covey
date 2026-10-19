@@ -293,7 +293,7 @@ func (p *actionProxy) controlPlane(ctx context.Context, action string, params js
 		return map[string]string{"status": "ok", "stage": in.Stage}
 	case "list_targets", "get_agent_config", "create_agent", "set_agent_config",
 		"enable_target", "add_egress_host", "work_record", "read_recording", "propose_agent_config", "write_review",
-		"create_issue", "start_services", "style_check", "style_apply", "correction", "voice_draft":
+		"create_issue", "start_services", "services_status", "style_check", "style_apply", "correction", "voice_draft":
 		// The meta actions at the registry of the platform: drafting (spec/20)
 		// and reviewing (spec/21). Everything is decided in the control
 		// plane — scope, guard rails, approvals —, the proxy only carries the

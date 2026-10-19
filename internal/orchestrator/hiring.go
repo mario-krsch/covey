@@ -100,6 +100,9 @@ var coveyOps = map[string]coveyOp{
 	// colleagues, and a QA agent that needs a database has nothing to do
 	// with that.
 	"start_services": {Subject: "covey:start_services", Scopes: []string{scopeServices}},
+	// The second half of a start that answered "provisioning" (#603): reading,
+	// so the same scope and its own subject.
+	"services_status": {Subject: "covey:services_status", Scopes: []string{scopeServices}},
 
 	// Text as a platform service (styleservice.go): no scope, like the wiki.
 	// Measuring a text changes nothing; revising one costs the organisation's
@@ -267,6 +270,8 @@ func (o *Orchestrator) hiring(ctx context.Context, agent agents.Agent, taskID uu
 		return o.platformIssue(ctx, agent, taskID, req, ok, fail)
 	case "start_services":
 		return o.startServices(ctx, agent, taskID, req, ok, fail)
+	case "services_status":
+		return o.servicesStatus(agent, ok, fail)
 	case "style_check":
 		return o.styleCheckAction(ctx, agent, taskID, req, ok, fail)
 	case "style_apply":

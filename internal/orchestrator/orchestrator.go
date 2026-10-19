@@ -440,6 +440,9 @@ type session struct {
 	// run worked against were often brought up in a waking phase that is no
 	// longer on screen. Each job records them again from here.
 	services []sandbox.ServiceRun
+	// provision is the agent's last start_services, kept while the host may
+	// still be pulling; services_status reads it (#603).
+	provision *serviceProvision
 }
 
 // Run starts the dispatch loop: cheap, permanent, no LLM (spec/03).

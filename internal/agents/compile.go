@@ -669,6 +669,14 @@ What comes back has three lists, and they mean three different things:
   the image — and carry on without it, or say plainly which part of your
   assignment you could not do.
 
+An image the host does not have yet has to be pulled first, and that can take
+minutes. Then the answer comes back with ` + "`\"state\":\"provisioning\"`" + ` and the
+services still coming up in ` + "`pending`" + `. Do not send the file again; ask until
+` + "`state`" + ` is ` + "`ready`" + ` (they are listed in ` + "`services`" + `) or ` + "`failed`" + ` (with the
+` + "`error`" + `):
+
+   ` + "`curl -s -X POST http://localhost:$COVEY_ACTION_PORT/actions/covey/services_status -d '{}'`" + `
+
 Three things this is not:
 
 **Not a substitute for reading.** The compose file may set variables the project
