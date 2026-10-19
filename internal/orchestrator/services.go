@@ -51,9 +51,12 @@ import (
 // not answered within serviceAnswerWait (#603). Pending then names what is
 // still coming up, and services_status reports the outcome.
 type serviceResult struct {
-	State   string                `json:"state"`
-	Started []sandbox.ServiceRun  `json:"started"`
-	Pending []string              `json:"pending,omitempty"`
+	State   string               `json:"state"`
+	Started []sandbox.ServiceRun `json:"started"`
+	Pending []string             `json:"pending,omitempty"`
+	// Kept are services that already ran under the same name and image and
+	// were left alone (env_up on a warm sandbox).
+	Kept    []string              `json:"kept,omitempty"`
 	Skipped []sandbox.ComposeSkip `json:"skipped,omitempty"`
 	Refused []serviceRefusal      `json:"refused,omitempty"`
 	Hint    string                `json:"hint,omitempty"`
@@ -134,6 +137,55 @@ func (o *Orchestrator) startServices(
 		wanted = keep
 	}
 
+	return o.launchServices(ctx, agent, taskID, "compose", wanted, skipped, false, ok, fail)
+}
+
+// recipeServices serves covey/env_up and covey/env_reset (spec/30): the
+// services of a project recipe, which the daemon read out of the checkout.
+// Either the content of the compose file the recipe names, or the services it
+// declares itself.
+//
+// env_up keeps what already runs under the same name and image. That is what a
+// warm sandbox is for, and bringing a database up again would empty it.
+// env_reset recreates them: the runner replaces a container asked for under a
+// name it already has, and a service keeps no volume, so it comes back empty.
+func (o *Orchestrator) recipeServices(
+	ctx context.Context, agent agents.Agent, taskID uuid.UUID, req daemon.RequestHiring, reset bool,
+	ok func(any) daemon.InjectHiring, fail func(string, ...any) daemon.InjectHiring,
+) daemon.InjectHiring {
+	var wanted []sandbox.Service
+	var skipped []sandbox.ComposeSkip
+	if raw := strings.TrimSpace(req.Compose); raw != "" {
+		parsed, err := sandbox.ParseCompose([]byte(raw))
+		if err != nil {
+			return fail("%v", err)
+		}
+		wanted, skipped = parsed.Services, parsed.Skipped
+	} else if len(req.Services) > 0 {
+		decl := make([]sandbox.Service, 0, len(req.Services))
+		for _, d := range req.Services {
+			decl = append(decl, sandbox.Service{Name: d.Name, Image: d.Image, Env: d.Env})
+		}
+		valid, err := sandbox.ValidateServices(decl)
+		if err != nil {
+			return fail("covey.project.yml: %v", err)
+		}
+		wanted = valid
+	}
+	if len(wanted) == 0 && len(skipped) == 0 {
+		// A recipe without services: nothing to start, nothing to record.
+		return ok(serviceResult{State: "ready", Started: []sandbox.ServiceRun{}})
+	}
+	return o.launchServices(ctx, agent, taskID, "recipe", wanted, skipped, reset, ok, fail)
+}
+
+// launchServices is the part every source shares: the allowlist, the start on
+// the host that holds the sandbox, and the answer within the daemon's deadline.
+func (o *Orchestrator) launchServices(
+	ctx context.Context, agent agents.Agent, taskID uuid.UUID, source string,
+	wanted []sandbox.Service, skipped []sandbox.ComposeSkip, reset bool,
+	ok func(any) daemon.InjectHiring, fail func(string, ...any) daemon.InjectHiring,
+) daemon.InjectHiring {
 	// The organisation's allowlist. Per service, not for the whole file: see
 	// the note above about partial being normal here.
 	var allowed []sandbox.Service
@@ -164,8 +216,11 @@ func (o *Orchestrator) startServices(
 	}
 
 	result := serviceResult{State: "ready", Started: []sandbox.ServiceRun{}, Skipped: skipped, Refused: refused}
+	if !reset {
+		allowed, result.Kept = o.withoutRunning(agent.ID, allowed)
+	}
 	if len(allowed) == 0 {
-		o.recordServiceRequest(ctx, agent, taskID, "started", nil, refused, nil)
+		o.recordServiceRequest(ctx, agent, taskID, source, "started", nil, refused, nil)
 		return ok(result)
 	}
 	starter, canStart := o.sandboxOf(agent.ID).(ServiceStarter)
@@ -204,14 +259,14 @@ func (o *Orchestrator) startServices(
 			// Recorded even in failure: an agent that could not get its
 			// database is the most common reason for a run that reads like the
 			// project is broken.
-			o.recordServiceRequest(bg, agent, taskID, "failed", nil, refused, err)
+			o.recordServiceRequest(bg, agent, taskID, source, "failed", nil, refused, err)
 		} else {
 			o.mu.Lock()
 			if s := o.sessions[agent.ID]; s != nil {
-				s.services = append(s.services, started...)
+				s.services = mergeServices(s.services, started)
 			}
 			o.mu.Unlock()
-			o.recordServiceRequest(bg, agent, taskID, "started", started, refused, nil)
+			o.recordServiceRequest(bg, agent, taskID, source, "started", started, refused, nil)
 		}
 		p.started, p.err = started, err
 		close(p.done)
@@ -269,6 +324,44 @@ func (o *Orchestrator) servicesStatus(
 	return ok(out)
 }
 
+// withoutRunning drops the services that already run beside the sandbox under
+// the same name and image, and names them.
+func (o *Orchestrator) withoutRunning(agentID uuid.UUID, wanted []sandbox.Service) ([]sandbox.Service, []string) {
+	o.mu.Lock()
+	var running []sandbox.ServiceRun
+	if s := o.sessions[agentID]; s != nil {
+		running = s.services
+	}
+	o.mu.Unlock()
+	var start []sandbox.Service
+	var kept []string
+	for _, svc := range wanted {
+		if slices.ContainsFunc(running, func(r sandbox.ServiceRun) bool {
+			return r.Name == svc.Name && r.Image == svc.Image
+		}) {
+			kept = append(kept, svc.Name)
+			continue
+		}
+		start = append(start, svc)
+	}
+	return start, kept
+}
+
+// mergeServices adds what started to what runs. A name started again replaces
+// its entry: the runner replaced the container, and two entries for one
+// address would report a service twice.
+func mergeServices(have, started []sandbox.ServiceRun) []sandbox.ServiceRun {
+	out := slices.Clone(have)
+	for _, st := range started {
+		if i := slices.IndexFunc(out, func(r sandbox.ServiceRun) bool { return r.Name == st.Name }); i >= 0 {
+			out[i] = st
+			continue
+		}
+		out = append(out, st)
+	}
+	return out
+}
+
 // sandboxOf is the sandbox of a running session, or nil.
 func (o *Orchestrator) sandboxOf(agentID uuid.UUID) Sandbox {
 	o.mu.Lock()
@@ -282,13 +375,13 @@ func (o *Orchestrator) sandboxOf(agentID uuid.UUID) Sandbox {
 // recordServiceRequest writes what the agent asked for and what came of it —
 // against the TASK, because this happened during a run and belongs to it.
 func (o *Orchestrator) recordServiceRequest(
-	ctx context.Context, agent agents.Agent, taskID uuid.UUID, status string,
+	ctx context.Context, agent agents.Agent, taskID uuid.UUID, source, status string,
 	started []sandbox.ServiceRun, refused []serviceRefusal, err error,
 ) {
 	if o.Obs == nil {
 		return
 	}
-	payload := map[string]any{"status": status, "source": "compose"}
+	payload := map[string]any{"status": status, "source": source}
 	if len(started) > 0 {
 		payload["services"] = started
 	}

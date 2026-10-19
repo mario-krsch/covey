@@ -103,6 +103,13 @@ var coveyOps = map[string]coveyOp{
 	// The second half of a start that answered "provisioning" (#603): reading,
 	// so the same scope and its own subject.
 	"services_status": {Subject: "covey:services_status", Scopes: []string{scopeServices}},
+	// The project recipe (spec/30): the daemon reads covey.project.yml and
+	// sends its services here. The same scope, because what these do beyond
+	// start_services writes into the agent's own checkout and nothing else;
+	// subjects of their own, so env_reset can be gated without env_up.
+	"env_up":     {Subject: "covey:env_up", Scopes: []string{scopeServices}},
+	"env_reset":  {Subject: "covey:env_reset", Scopes: []string{scopeServices}},
+	"env_status": {Subject: "covey:env_status", Scopes: []string{scopeServices}},
 
 	// Text as a platform service (styleservice.go): no scope, like the wiki.
 	// Measuring a text changes nothing; revising one costs the organisation's
@@ -270,8 +277,12 @@ func (o *Orchestrator) hiring(ctx context.Context, agent agents.Agent, taskID uu
 		return o.platformIssue(ctx, agent, taskID, req, ok, fail)
 	case "start_services":
 		return o.startServices(ctx, agent, taskID, req, ok, fail)
-	case "services_status":
+	case "services_status", "env_status":
 		return o.servicesStatus(agent, ok, fail)
+	case "env_up":
+		return o.recipeServices(ctx, agent, taskID, req, false, ok, fail)
+	case "env_reset":
+		return o.recipeServices(ctx, agent, taskID, req, true, ok, fail)
 	case "style_check":
 		return o.styleCheckAction(ctx, agent, taskID, req, ok, fail)
 	case "style_apply":

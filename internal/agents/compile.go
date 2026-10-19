@@ -692,7 +692,31 @@ service did not start.
 
 You do not install these services, you do not configure them and you do not
 operate them. If one is missing from the file, that is a finding about the
-project, not a job for you.`
+project, not a job for you.
+
+### When the project has a recipe
+
+A ` + "`covey.project.yml`" + ` at the root of a checkout is the project's own recipe:
+its services, the variables its application expects (secrets included, by name),
+its commands, the processes to start, where the application answers, and which
+tests are known to be red. When it is there, use it instead of the compose file:
+
+   ` + "`curl -s -X POST http://localhost:$COVEY_ACTION_PORT/actions/covey/env_up -d '{\"checkout\":\"<the path from the checkout result>\"}'`" + `
+   — brings up the services (what already runs is kept), writes the
+     application's environment where the recipe says, and answers with
+     ` + "`commands`" + `, ` + "`start`" + ` (each with ` + "`dev_start`" + ` parameters to pass to dev start
+     as they are), ` + "`app`" + `, ` + "`baseline`" + ` and ` + "`next`" + `. A monorepo recipe needs
+     ` + "`\"component\":\"<name>\"`" + ` as well.
+   ` + "`covey/env_reset`" + ` — the same parameters; recreates the services EMPTY and
+     writes the environment again. The step after switching a checkout to
+     another branch: a warm database does not know the branch changed. Then
+     run the recipe's migrate and seed.
+   ` + "`covey/env_status`" + ` — what runs, and what was written where.
+
+Secret values never reach you: the environment holds them, the answers name
+them. If env_up fails naming a secret, it is not stored for you — report it by
+name. No recipe in the checkout means env_up fails; writing one is a merge
+request to the project, not something to improvise.`
 
 // ReviewDoc describes the review actions (spec/21). Like HiringDoc it follows
 // the SCOPE, not the agent: it stands in the prompt of whoever has

@@ -34,6 +34,9 @@ type actionProxy struct {
 	// client.secret (a real, uncached control-plane round-trip); tests set
 	// this directly to a stub instead of standing up a fake connection.
 	fetchSecret func(ctx context.Context, key, taskID string) (InjectSecret, error)
+	// askHiring sends a meta action to the control plane. Defaults to
+	// client.hiring; tests set a stub, like fetchSecret.
+	askHiring func(ctx context.Context, req RequestHiring) (InjectHiring, error)
 }
 
 func (c *Client) startActionProxy(ctx context.Context, taskID string, tools []ActionTool) (*actionProxy, error) {
@@ -41,7 +44,7 @@ func (c *Client) startActionProxy(ctx context.Context, taskID string, tools []Ac
 	if err != nil {
 		return nil, err
 	}
-	p := &actionProxy{client: c, taskID: taskID, ln: ln, tools: tools, fetchSecret: c.secret}
+	p := &actionProxy{client: c, taskID: taskID, ln: ln, tools: tools, fetchSecret: c.secret, askHiring: c.hiring}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /actions/{system}/{action}", p.handle)
 	// The same actions once more as MCP tools — one door onto the same room
@@ -291,6 +294,10 @@ func (p *actionProxy) controlPlane(ctx context.Context, action string, params js
 		audit, _ := json.Marshal(map[string]any{"action": "covey:set_stage", "stage": in.Stage})
 		_ = p.client.send(TypeEvent, Event{TaskID: p.taskID, Kind: "action", Payload: audit})
 		return map[string]string{"status": "ok", "stage": in.Stage}
+	case "env_up", "env_reset", "env_status":
+		// The project recipe (spec/30, projectenv.go): read and written here,
+		// in the sandbox; decided in the control plane.
+		return p.projectEnv(ctx, action, params)
 	case "list_targets", "get_agent_config", "create_agent", "set_agent_config",
 		"enable_target", "add_egress_host", "work_record", "read_recording", "propose_agent_config", "write_review",
 		"create_issue", "start_services", "services_status", "style_check", "style_apply", "correction", "voice_draft":

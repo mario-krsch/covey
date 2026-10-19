@@ -564,6 +564,10 @@ type RequestHiring struct {
 	// database, leave the rest. Empty = everything the file offers and the
 	// organisation allows.
 	Only []string `json:"only,omitempty"`
+	// Services are the services a project recipe declares (env_up, env_reset;
+	// spec/30). The daemon read them out of covey.project.yml; a recipe that
+	// names a compose file sends that file's content as Compose instead.
+	Services []ServiceDecl `json:"services,omitempty"`
 
 	// --- A voice drafted from a conversation (covey/voice_draft, #458) ---
 
@@ -595,6 +599,15 @@ type ReviewNote struct {
 // a guard rail may put a meta action in front of a human (spec/21). The action
 // has then NOT happened — the agent blocks on CorrelationKey and repeats it
 // once somebody has decided, exactly as with a target-system action.
+// ServiceDecl is a service as a recipe declares it. The control plane validates
+// it like any other declaration (sandbox.ValidateServices) and asks the
+// organisation's allowlist.
+type ServiceDecl struct {
+	Name  string            `json:"name"`
+	Image string            `json:"image"`
+	Env   map[string]string `json:"env,omitempty"`
+}
+
 type InjectHiring struct {
 	RequestID string          `json:"request_id"`
 	OK        bool            `json:"ok"`

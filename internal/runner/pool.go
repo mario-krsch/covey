@@ -1904,7 +1904,15 @@ func (s *poolSandbox) StartServices(ctx context.Context, services []sandbox.Serv
 	// for. The two differ exactly when something went wrong quietly, and that
 	// is the case worth not papering over.
 	s.pool.mu.Lock()
-	s.services = append(s.services, res.Services...)
+	for _, run := range res.Services {
+		// A name asked for again replaced its container on the host; it
+		// replaces its entry here too, or the next wake reports it twice.
+		if i := slices.IndexFunc(s.services, func(r sandbox.ServiceRun) bool { return r.Name == run.Name }); i >= 0 {
+			s.services[i] = run
+			continue
+		}
+		s.services = append(s.services, run)
+	}
 	s.pool.mu.Unlock()
 	return res.Services, nil
 }

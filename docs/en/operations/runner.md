@@ -360,6 +360,16 @@ allowlist permits, so this grants no new reach: the privileged act stays
 extending the list. Without that scope the agent neither reads about the action
 in its prompt nor may call it.
 
+**A project can carry its own recipe.** A `covey.project.yml` at the root of a
+repository names the project's services, the variables its application expects,
+the secrets among them (by name), its commands and how it is started
+(spec/30). The same scope lets an agent act on it: `covey/env_up` brings the
+services up through the same allowlist and writes the application's
+environment, `covey/env_reset` recreates the services empty after a branch
+change. A secret the recipe names has to be stored for the agent, or assigned
+to it, under exactly that key; `covey:env_up` and `covey:env_reset` are
+guard-rail subjects of their own if you want a human in the loop.
+
 Useful to know when you read such a run: the project's own application is
 normally *skipped*, because it is built from the source the agent has and
 belongs inside its sandbox rather than beside it. And a service the allowlist

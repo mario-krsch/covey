@@ -179,3 +179,64 @@ func TestServicesStatusWithoutASandbox(t *testing.T) {
 		t.Fatal("services_status without a running sandbox must fail")
 	}
 }
+
+func recipeCall(t *testing.T, o *Orchestrator, agent agents.Agent, reset bool, decl ...daemon.ServiceDecl) map[string]any {
+	t.Helper()
+	ok := func(v any) daemon.InjectHiring {
+		raw, _ := json.Marshal(v)
+		return daemon.InjectHiring{OK: true, Data: raw}
+	}
+	fail := func(format string, args ...any) daemon.InjectHiring {
+		return daemon.InjectHiring{Error: fmt.Sprintf(format, args...)}
+	}
+	resp := o.recipeServices(context.Background(), agent, uuid.New(),
+		daemon.RequestHiring{Op: "env_up", Services: decl}, reset, ok, fail)
+	if !resp.OK {
+		return map[string]any{"error": resp.Error}
+	}
+	var out map[string]any
+	_ = json.Unmarshal(resp.Data, &out)
+	return out
+}
+
+// env_up on a warm sandbox leaves the database alone; env_reset brings it back
+// empty. Both keep one entry per name (spec/30).
+func TestRecipeServicesKeepOnUpAndRecreateOnReset(t *testing.T) {
+	sb := &slowStarter{release: make(chan struct{})}
+	close(sb.release)
+	o, agent, _ := serviceHarness(t, sb)
+	db := daemon.ServiceDecl{Name: "db", Image: "postgres:16"}
+
+	if got := recipeCall(t, o, agent, false, db); got["state"] != "ready" || sb.calls.Load() != 1 {
+		t.Fatalf("first env_up must start the service: %+v", got)
+	}
+	got := recipeCall(t, o, agent, false, db)
+	if sb.calls.Load() != 1 || fmt.Sprint(got["kept"]) != "[db]" {
+		t.Fatalf("a second env_up must keep what runs: calls=%d %+v", sb.calls.Load(), got)
+	}
+	recipeCall(t, o, agent, true, db)
+	if sb.calls.Load() != 2 {
+		t.Fatal("env_reset must recreate the service")
+	}
+	// Another image under the same name is not the same service.
+	recipeCall(t, o, agent, false, daemon.ServiceDecl{Name: "db", Image: "postgres:17"})
+	if sb.calls.Load() != 3 {
+		t.Fatal("env_up with a changed image must start it")
+	}
+	o.mu.Lock()
+	running := o.sessions[agent.ID].services
+	o.mu.Unlock()
+	if len(running) != 1 || running[0].Image != "postgres:17" {
+		t.Fatalf("one entry per name, the latest: %+v", running)
+	}
+}
+
+func TestRecipeServicesAreValidated(t *testing.T) {
+	sb := &slowStarter{release: make(chan struct{})}
+	close(sb.release)
+	o, agent, _ := serviceHarness(t, sb)
+	got := recipeCall(t, o, agent, false, daemon.ServiceDecl{Name: "Not A Host", Image: "postgres:16"})
+	if got["error"] == nil || sb.calls.Load() != 0 {
+		t.Fatalf("an invalid service name must be refused before anything starts: %+v", got)
+	}
+}
