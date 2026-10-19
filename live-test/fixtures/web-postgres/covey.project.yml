@@ -1,0 +1,38 @@
+version: 1
+name: live-test-web
+
+services:
+  - name: db
+    image: postgres:16
+    env: { POSTGRES_USER: app, POSTGRES_PASSWORD: test, POSTGRES_DB: app }
+
+secrets:
+  - demo_api_token
+
+env:
+  write_to: .env
+  base: .env.example
+  vars:
+    DB_HOST: db
+    DB_PASSWORD: test
+    DEMO_API_TOKEN: "{{ secret.demo_api_token }}"
+
+commands:
+  install: npm ci
+  migrate: npm run migrate
+  seed: npm run seed
+  test: npm test
+
+start:
+  web:
+    cmd: npm start
+    port: 3000
+
+app:
+  url: http://localhost:3000
+  ready: "GET /health 200"
+
+baseline:
+  ref: main
+  known_failing:
+    - "test/price.test.js: parses a legacy price without cents"

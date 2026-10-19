@@ -1,0 +1,14 @@
+{
+  "name": "live-test-web",
+  "private": true,
+  "description": "A small shop on Postgres for the covey live test (live-test/README.md).",
+  "scripts": {
+    "migrate": "node --env-file=.env scripts/migrate.js",
+    "seed": "node --env-file=.env scripts/seed.js",
+    "start": "node --env-file=.env server.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "pg": "8.13.1"
+  }
+}

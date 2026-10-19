@@ -1,0 +1,25 @@
+version: 1
+name: live-test-flutter
+
+commands:
+  # marionette_mcp lands in ~/.pub-cache/bin, which the dev-flutter-desktop
+  # workplace puts on the PATH the runtime starts MCP servers with.
+  install: flutter pub get && dart pub global activate marionette_mcp
+  test: flutter test
+  build: flutter build linux --debug
+
+start:
+  display:
+    cmd: Xvfb :99 -screen 0 1280x800x24 -nolisten tcp
+  desktop:
+    cmd: flutter run -d linux
+    control: flutter
+
+mcp:
+  marionette:
+    command: marionette_mcp
+
+baseline:
+  ref: main
+  known_failing:
+    - "test/widget_test.dart: an empty title is refused"
