@@ -181,3 +181,15 @@ func TestStageTwoValidation(t *testing.T) {
 		t.Fatalf("ParseReady: %s %s %d %v", m, p, st, err)
 	}
 }
+
+func TestFlutterWebSocketURI(t *testing.T) {
+	for in, want := range map[string]string{
+		"http://127.0.0.1:41235/Qx9c=/":  "ws://127.0.0.1:41235/Qx9c=/ws",
+		"https://127.0.0.1:41235/Qx9c=/": "wss://127.0.0.1:41235/Qx9c=/ws",
+		"ws://already/ws":                "",
+	} {
+		if got := FlutterWebSocketURI(in); got != want {
+			t.Errorf("%s: got %q, want %q", in, got, want)
+		}
+	}
+}

@@ -106,6 +106,21 @@ const ControlFlutter = "flutter"
 // http://127.0.0.1:41235/abc=/" and the older wording with "Observatory".
 var flutterVMService = regexp.MustCompile(`(?:Dart VM Service|Observatory)[^\n]*?available at:\s*(https?://\S+)`)
 
+// FlutterWebSocketURI turns the VM service address Flutter prints
+// (http://127.0.0.1:41235/abc=/) into the form the tools connect with
+// (ws://127.0.0.1:41235/abc=/ws). marionette_mcp refuses the http form.
+func FlutterWebSocketURI(uri string) string {
+	rest, ok := strings.CutPrefix(uri, "http://")
+	scheme := "ws://"
+	if !ok {
+		if rest, ok = strings.CutPrefix(uri, "https://"); !ok {
+			return ""
+		}
+		scheme = "wss://"
+	}
+	return scheme + strings.TrimSuffix(rest, "/") + "/ws"
+}
+
 // ControlPattern is the expression a control value stands for.
 func ControlPattern(control string) (*regexp.Regexp, error) {
 	if control == ControlFlutter {

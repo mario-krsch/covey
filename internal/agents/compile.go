@@ -715,7 +715,8 @@ tests are known to be red. When it is there, use it instead of the compose file:
      recipe's ` + "`app.ready`" + ` check passes right now (ask again rather than
      clicking into an application that is not up), and under ` + "`control`" + ` the
      address a tool connects to, read from a started process's log — for a
-     Flutter run its VM service URI, which changes every run.
+     Flutter run its VM service URI, which changes every run, with ` + "`ws_uri`" + `,
+     the form marionette's connect takes.
 
    ` + "`covey/env_install`" + ` — runs the recipe's ` + "`commands.install`" + ` as a job with
      the registry credentials its ` + "`install_env`" + ` names (an npm token,

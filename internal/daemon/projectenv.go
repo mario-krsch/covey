@@ -399,7 +399,12 @@ func controlURIs(home string, start map[string]recipe.Process) map[string]any {
 		if len(last) > 1 && last[1] != "" {
 			uri = last[1]
 		}
-		out[name] = map[string]any{"uri": uri}
+		entry := map[string]any{"uri": uri}
+		if proc.Control == recipe.ControlFlutter {
+			// What marionette and the Dart MCP server connect with.
+			entry["ws_uri"] = recipe.FlutterWebSocketURI(uri)
+		}
+		out[name] = entry
 	}
 	return out
 }

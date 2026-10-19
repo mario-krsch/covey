@@ -17,7 +17,7 @@
     "pub": "~/.pub-cache/bin is on the PATH, also for MCP servers the runtime starts: a tool activated with `dart pub global activate` is found there from your next run on"
   },
   "notes": [
-    "Run the application natively to operate it: `flutter run -d linux` as a dev job, after the display is up. The VM service URI it prints is what marionette or the Dart MCP server connect to; with a recipe, covey/env_status reports it for a start entry whose control is `flutter`.",
+    "Run the application natively to operate it: `flutter run -d linux` as a dev job, after the display is up. Tools connect to its VM service in the WebSocket form, ws://127.0.0.1:<port>/<token>=/ws — not the http:// line it prints. With a recipe, covey/env_status reports both for a start entry whose control is `flutter` (ws_uri).",
     "There is no GPU. Rendering is Mesa in software — correct, and slower than on a developer's machine. Judge animations by their end state, not by their frame rate.",
     "No Android SDK and no emulator: a sandbox gets no /dev/kvm. A device test is a case for a human.",
     "You are not root and apt is not available to you. If a tool is missing, say so instead of building a way around it — that is a request, not a defeat."

@@ -278,8 +278,9 @@ func TestEnvStatusProbesTheAppAndReadsTheControlURI(t *testing.T) {
 		"A Dart VM Service on Linux is available at: http://127.0.0.1:1111/old=/\n"+
 			"Restarted.\nA Dart VM Service on Linux is available at: http://127.0.0.1:2222/new=/\n"), 0o644)
 	st = h.run(t, "env_status", map[string]string{"checkout": h.checkout})["data"].(map[string]any)
-	if uri := st["control"].(map[string]any)["desktop"].(map[string]any)["uri"]; uri != "http://127.0.0.1:2222/new=/" {
-		t.Fatalf("the latest VM service URI must be reported: %v", uri)
+	desktop := st["control"].(map[string]any)["desktop"].(map[string]any)
+	if desktop["uri"] != "http://127.0.0.1:2222/new=/" || desktop["ws_uri"] != "ws://127.0.0.1:2222/new=/ws" {
+		t.Fatalf("the latest VM service URI must be reported, with its WebSocket form: %v", desktop)
 	}
 
 	app.Close()
