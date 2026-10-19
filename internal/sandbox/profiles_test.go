@@ -186,8 +186,10 @@ func TestEveryProfileNamesAFileThatExists(t *testing.T) {
 //
 // Which matrix a profile belongs in is not written down twice either: it
 // follows from its Dockerfile. One that starts on `base` is built in the second
-// stage beside the others; one that starts on `dev` has to wait until `dev` is
-// published, and that is what the third stage is for.
+// stage beside the others; one that starts on a second-stage image (`dev`,
+// `dev-flutter`) has to wait until that is published, and that is what the
+// third stage is for — where `include` names each profile's base, and that has
+// to be the one its Dockerfile says.
 func TestTheWorkflowBuildsExactlyTheseProfiles(t *testing.T) {
 	roh, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "sandbox-images.yml"))
 	if err != nil {
@@ -196,6 +198,7 @@ func TestTheWorkflowBuildsExactlyTheseProfiles(t *testing.T) {
 	workflow := string(roh)
 
 	var alle, aufBase, aufDev []string
+	basisVon := map[string]string{}
 	for _, p := range All() {
 		alle = append(alle, p.Name)
 		if p.Name == "base" {
@@ -213,6 +216,10 @@ func TestTheWorkflowBuildsExactlyTheseProfiles(t *testing.T) {
 			aufBase = append(aufBase, p.Name)
 		case strings.Contains(string(df), "ARG BASE_IMAGE=covey-sandbox-dev:latest"):
 			aufDev = append(aufDev, p.Name)
+			basisVon[p.Name] = "dev"
+		case strings.Contains(string(df), "ARG BASE_IMAGE=covey-sandbox-dev-flutter:latest"):
+			aufDev = append(aufDev, p.Name)
+			basisVon[p.Name] = "dev-flutter"
 		default:
 			t.Errorf("%s names no base image this workflow knows how to stage", p.Dockerfile)
 		}
@@ -228,6 +235,15 @@ func TestTheWorkflowBuildsExactlyTheseProfiles(t *testing.T) {
 		{"the third stage", `profile: \[(dev-full[^\]]*)\]`, ",", aufDev},
 		{"the digest loop", `profiles="([^"]*)"`, " ", alle},
 		{"the catalogue order", `reihenfolge = \[n for n in \(([^)]*)\)`, ",", alle},
+	}
+	for name, basis := range basisVon {
+		muster := regexp.MustCompile(`- profile: ` + regexp.QuoteMeta(name) + `\s+base: (\S+)`)
+		m := muster.FindStringSubmatch(workflow)
+		if m == nil {
+			t.Errorf("the third stage names no base for %s", name)
+		} else if m[1] != basis {
+			t.Errorf("the third stage builds %s on %s, its Dockerfile on %s", name, m[1], basis)
+		}
 	}
 	for _, f := range fundstellen {
 		treffer := regexp.MustCompile(f.muster).FindAllStringSubmatch(workflow, -1)

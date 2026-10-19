@@ -2514,6 +2514,7 @@ func (o *Orchestrator) processTask(ctx context.Context, agent agents.Agent, link
 		AllowedTools: o.RuntimeTools,
 		MaxTurns:     maxTurns,
 		ActionTools:  actionTools,
+		RecipeMCP:    o.mayRunRecipeMCP(ctx, agent),
 	}); err != nil {
 		return err
 	}

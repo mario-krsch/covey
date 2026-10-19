@@ -3,6 +3,8 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -225,5 +227,63 @@ func TestEnvUpSendsTheComposeFileTheRecipeNames(t *testing.T) {
 	}
 	if !strings.Contains(h.asked[0].Compose, "postgres:16") {
 		t.Fatalf("the compose content must travel: %+v", h.asked[0])
+	}
+}
+
+func TestEnvUpFallsBackToTheDevcontainersComposeFile(t *testing.T) {
+	h := newEnvHarness(t, "", nil)
+	os.MkdirAll(filepath.Join(h.checkout, ".devcontainer"), 0o755)
+	os.WriteFile(filepath.Join(h.checkout, ".devcontainer", "devcontainer.json"), []byte(`{
+  // the team's container
+  "name": "acme // not a comment",
+  "dockerComposeFile": "../docker-compose.yml", /* relative to this file */
+  "forwardPorts": [8000,],
+}`), 0o644)
+	os.WriteFile(filepath.Join(h.checkout, "docker-compose.yml"), []byte("services:\n  db:\n    image: postgres:16\n"), 0o644)
+
+	got := h.run(t, "env_up", map[string]string{"checkout": h.checkout})
+	if got["status"] != "ok" || got["data"].(map[string]any)["from"] != "devcontainer" {
+		t.Fatalf("a devcontainer's compose file must be used: %+v", got)
+	}
+	if !strings.Contains(h.asked[0].Compose, "postgres:16") {
+		t.Fatalf("the compose content must travel: %+v", h.asked[0])
+	}
+}
+
+func TestEnvStatusProbesTheAppAndReadsTheControlURI(t *testing.T) {
+	app := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer app.Close()
+	recipeText := "version: 1\napp:\n  url: " + app.URL + "\n  ready: \"GET /health 204\"\n" +
+		"start:\n  desktop:\n    cmd: flutter run -d linux\n    control: flutter\n"
+	h := newEnvHarness(t, recipeText, nil)
+
+	st := h.run(t, "env_status", map[string]string{"checkout": h.checkout})["data"].(map[string]any)
+	if st["app"].(map[string]any)["ready"] != true {
+		t.Fatalf("app.ready must pass: %+v", st["app"])
+	}
+	if c := st["control"].(map[string]any)["desktop"].(map[string]any); c["uri"] != nil {
+		t.Fatalf("without a log there is no URI: %+v", c)
+	}
+
+	jobs := filepath.Join(h.home, ".covey", "jobs")
+	os.MkdirAll(jobs, 0o755)
+	os.WriteFile(filepath.Join(jobs, "desktop.log"), []byte(
+		"A Dart VM Service on Linux is available at: http://127.0.0.1:1111/old=/\n"+
+			"Restarted.\nA Dart VM Service on Linux is available at: http://127.0.0.1:2222/new=/\n"), 0o644)
+	st = h.run(t, "env_status", map[string]string{"checkout": h.checkout})["data"].(map[string]any)
+	if uri := st["control"].(map[string]any)["desktop"].(map[string]any)["uri"]; uri != "http://127.0.0.1:2222/new=/" {
+		t.Fatalf("the latest VM service URI must be reported: %v", uri)
+	}
+
+	app.Close()
+	st = h.run(t, "env_status", map[string]string{"checkout": h.checkout})["data"].(map[string]any)
+	if st["app"].(map[string]any)["ready"] != false {
+		t.Fatalf("a closed app must not pass: %+v", st["app"])
 	}
 }

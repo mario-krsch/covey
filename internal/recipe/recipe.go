@@ -88,6 +88,26 @@ type Process struct {
 	Port int    `yaml:"port" json:"port,omitempty"`
 	// Cwd is relative to the stack; empty is the stack itself.
 	Cwd string `yaml:"cwd" json:"cwd,omitempty"`
+	// Control picks the address a tool connects to out of this process's log:
+	// a regular expression (its first group, or the whole match), or
+	// ControlFlutter for the VM service line a Flutter debug run prints.
+	Control string `yaml:"control" json:"control,omitempty"`
+}
+
+// ControlFlutter is the shorthand for the VM service URI of `flutter run`. It
+// is different on every run, which is why it is read rather than declared.
+const ControlFlutter = "flutter"
+
+// flutterVMService matches "A Dart VM Service on Linux is available at:
+// http://127.0.0.1:41235/abc=/" and the older wording with "Observatory".
+var flutterVMService = regexp.MustCompile(`(?:Dart VM Service|Observatory)[^\n]*?available at:\s*(https?://\S+)`)
+
+// ControlPattern is the expression a control value stands for.
+func ControlPattern(control string) (*regexp.Regexp, error) {
+	if control == ControlFlutter {
+		return flutterVMService, nil
+	}
+	return regexp.Compile(control)
 }
 
 // App is where a person would open the application, and how to tell it is up.
@@ -96,8 +116,8 @@ type App struct {
 	Ready string `yaml:"ready" json:"ready,omitempty"`
 }
 
-// MCPServer is a stdio MCP server the recipe asks for (spec/30, stage 2). It is
-// read and reported, not yet started.
+// MCPServer is a stdio MCP server the recipe asks for (spec/30). It is started
+// beside the runtime, without a shell, for an agent granted the dev scope mcp.
 type MCPServer struct {
 	Command string            `yaml:"command" json:"command"`
 	Args    []string          `yaml:"args" json:"args,omitempty"`
@@ -118,6 +138,11 @@ var (
 	// entryName is a component, command or start entry. Start entries become
 	// dev job names, so the charset is what a file name survives.
 	entryName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$`)
+	// mcpName is a server name: it becomes part of every tool name the
+	// runtime shows (mcp__<name>__<tool>), so it stays plain.
+	mcpName = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,29}$`)
+	// readyCheck is app.ready: "GET /health 200".
+	readyCheck = regexp.MustCompile(`^(GET|HEAD) (/\S*) ([1-5][0-9][0-9])$`)
 	// secretRef is how a variable names a secret: {{ secret.<name> }}.
 	secretRef = regexp.MustCompile(`\{\{\s*secret\.([A-Za-z0-9_.-]+)\s*\}\}`)
 )
@@ -234,13 +259,28 @@ func (s *Stack) validate() error {
 				return fmt.Errorf("start.%s: cwd: %w", name, err)
 			}
 		}
+		if p.Control != "" {
+			if _, err := ControlPattern(p.Control); err != nil {
+				return fmt.Errorf("start.%s: control: %v — a regular expression, or `%s`", name, err, ControlFlutter)
+			}
+		}
 	}
-	if s.App != nil && strings.TrimSpace(s.App.URL) == "" {
-		return errors.New("app has no `url`")
+	if s.App != nil {
+		if strings.TrimSpace(s.App.URL) == "" {
+			return errors.New("app has no `url`")
+		}
+		if s.App.Ready != "" {
+			if _, _, _, err := ParseReady(s.App.Ready); err != nil {
+				return fmt.Errorf("app.ready: %w", err)
+			}
+		}
 	}
 	for name, m := range s.MCP {
-		if !entryName.MatchString(name) {
-			return fmt.Errorf("mcp: %q is not a server name", name)
+		if !mcpName.MatchString(name) {
+			return fmt.Errorf("mcp: %q is not a server name (lower-case letters, digits, `_`, `-`, at most 30 characters)", name)
+		}
+		if name == "covey" {
+			return errors.New("mcp: the name `covey` is the platform's own server")
 		}
 		if strings.TrimSpace(m.Command) == "" {
 			return fmt.Errorf("mcp.%s has no `command`", name)
@@ -366,4 +406,14 @@ func (s *Stack) SecretNames() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// ParseReady reads app.ready: a method, a path and the status that means "up".
+func ParseReady(ready string) (method, path string, status int, err error) {
+	m := readyCheck.FindStringSubmatch(strings.TrimSpace(ready))
+	if m == nil {
+		return "", "", 0, fmt.Errorf("%q is not a check — write it as `GET /health 200`", ready)
+	}
+	fmt.Sscanf(m[3], "%d", &status)
+	return m[1], m[2], status, nil
 }

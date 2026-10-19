@@ -1,0 +1,58 @@
+# Sandbox image, profile `dev-flutter-desktop`: dev-flutter plus a display.
+# Build: `make sandbox-image-dev-flutter-desktop` (builds dev-flutter and base
+# along with it).
+#
+# What it is for (spec/30-project-recipes.md, "The desktop workplace"): a Flutter
+# application renders into a canvas, so the browser finds nothing to click in
+# it. What drives it is its VM service — and the marionette extensions that a
+# tool like marionette_mcp needs only register on a NATIVE target. On the web
+# target the isolate reports none. So a Flutter agent that has to operate the
+# application, not just build it, runs it as a Linux desktop application, on a
+# virtual display, rendered in software.
+#
+# Not part of `make sandbox-images` and not pulled by default: ~900 MB on top of
+# dev-flutter, and an installation without Flutter projects gets nothing from it.
+ARG BASE_IMAGE=covey-sandbox-dev-flutter:latest
+FROM ${BASE_IMAGE}
+
+USER root
+
+# The Linux desktop toolchain Flutter documents (clang, cmake, ninja, pkg-config,
+# GTK 3, lzma, the C++ standard library headers), and a display without a GPU:
+# Xvfb with Mesa's software rasteriser. No window manager — a Flutter window
+# needs none to render, and nobody is looking at it except through screenshots.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        clang cmake ninja-build pkg-config \
+        libgtk-3-dev liblzma-dev libstdc++-14-dev \
+        xvfb xauth x11-utils \
+        libgl1-mesa-dri libegl1 libgles2; \
+    rm -rf /var/lib/apt/lists/*; \
+    command -v Xvfb xvfb-run xdpyinfo clang cmake ninja pkg-config; \
+    pkg-config --exists gtk+-3.0
+
+# The display every process in the sandbox draws on. It is not started here: an
+# image has no init, and the agent starts it once per wake as a dev job (the
+# workplace notes say how), where it shows up in `dev list` like everything else.
+# Software GL, said explicitly: without a GPU Mesa would otherwise probe for one
+# first, and a Flutter window that waits on that looks like a hang.
+ENV DISPLAY=:99 \
+    LIBGL_ALWAYS_SOFTWARE=1
+
+# The Linux engine artefacts into the SDK in the image, as the user that owns
+# it: otherwise the first `flutter build linux` of every agent fetches them into
+# a tree that is reset with every image, on every wake.
+#
+# The pub cache's bin directory on the PATH: an MCP server a project activates
+# (`dart pub global activate marionette_mcp`, in its recipe's install command)
+# lands in the home, and the runtime starts MCP servers without a shell — so a
+# PATH exported in .bashrc never reaches them. This line does.
+USER agent
+RUN flutter precache --linux --no-web --no-android --no-ios
+ENV PATH=/home/agent/.pub-cache/bin:${PATH}
+
+COPY internal/sandbox/workplaces/dev-flutter-desktop.json /etc/covey/workplace.json
+
+WORKDIR /home/agent
+ENTRYPOINT ["coveyd"]

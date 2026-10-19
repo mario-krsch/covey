@@ -20,6 +20,7 @@ them, and what a choice costs.
 | `dev-php` | `covey-sandbox-dev-php:latest` | PHP 8.2, Composer, MariaDB, node-gyp | 2.12 GB | PHP/Laravel agents |
 | `dev-web` | `covey-sandbox-dev-web:latest` | node-gyp toolchain | 1.82 GB | Node/TypeScript agents |
 | `dev-full` | `covey-sandbox-dev-full:latest` | everything above, Flutter SDK included | 3.89 GB | an installation that would rather not split |
+| `dev-flutter-desktop` | `covey-sandbox-dev-flutter-desktop:latest` | `dev-flutter` plus clang, cmake, ninja, GTK 3, Xvfb, Mesa | `dev-flutter` + ~1.0 GB | Flutter agents that operate the application natively |
 
 Sizes measured with `docker images` on arm64 — uncompressed, so a pull moves
 less, and a host that already has `base` moves only the difference. Read them as
@@ -155,3 +156,20 @@ one home, all of which the image had been carrying for weeks.
 
 Say in `notes` that the agent is not root and has no apt. It is the sentence
 that turns "I will build myself a way around this" into a request for a tool.
+
+## The Flutter desktop workplace
+
+`dev-flutter-desktop` is `dev-flutter` with a display. A Flutter application
+renders into a canvas, so the browser plugin finds nothing to click in it; what
+drives it is its VM service, through stdio MCP servers such as marionette or the
+Dart MCP server. Their extensions only register on a native target, so the
+agent runs the application as a Linux desktop application, on Xvfb, rendered in
+software by Mesa — no GPU needed.
+
+It is published with the others but left out of `make sandbox-images` and of
+the default `SANDBOX_PROFILES`: add it where it is needed
+(`make sandbox-image-dev-flutter-desktop`, or `SANDBOX_PROFILES="… dev-flutter-desktop"`).
+The servers themselves come from the project's `covey.project.yml` and start
+only for an agent with `- system: dev scope: …,mcp` (spec/30). Android
+emulators and iOS are out of reach: a sandbox gets no `/dev/kvm`, and no Linux
+container runs the iOS Simulator.

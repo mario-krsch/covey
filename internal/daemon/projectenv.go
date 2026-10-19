@@ -17,6 +17,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -66,12 +68,7 @@ func (p *actionProxy) projectEnv(ctx context.Context, action string, params json
 	if err != nil {
 		return map[string]string{"status": "error", "error": err.Error()}
 	}
-	file := filepath.Join(root, recipe.FileName)
-	raw, err := readRecipe(file)
-	if err != nil {
-		return map[string]string{"status": "error", "error": err.Error()}
-	}
-	r, err := recipe.Parse(raw)
+	r, file, fromDevcontainer, err := loadRecipe(root)
 	if err != nil {
 		return map[string]string{"status": "error", "error": err.Error()}
 	}
@@ -85,7 +82,7 @@ func (p *actionProxy) projectEnv(ctx context.Context, action string, params json
 	}
 
 	if action == "env_status" {
-		return p.envStatus(ctx, home, root, in.Component)
+		return p.envStatus(ctx, home, root, in.Component, stack)
 	}
 
 	// The control plane first: it holds the gate (scope, guard rails), so
@@ -133,18 +130,21 @@ func (p *actionProxy) projectEnv(ctx context.Context, action string, params json
 	out := map[string]any{
 		"state":    services["state"],
 		"recipe":   file,
+		"from":     map[bool]string{true: "devcontainer", false: "recipe"}[fromDevcontainer],
 		"services": services,
 		"dir":      dir,
 	}
 	if in.Component != "" {
 		out["component"] = in.Component
 	}
+	// The record is kept even without an environment: it is also what makes
+	// this recipe's MCP servers count from the next run on (recipemcp.go).
+	rec := envRecord{Checkout: root, Component: in.Component, At: time.Now().UTC().Format(time.RFC3339), Op: action}
 	if written != nil {
 		out["env"] = written
-		rec := envRecord{Checkout: root, Component: in.Component, WrittenTo: written.WrittenTo,
-			Vars: written.Vars, Secrets: written.Secrets, At: time.Now().UTC().Format(time.RFC3339), Op: action}
-		saveEnvRecord(home, envKey(root, in.Component), rec)
+		rec.WrittenTo, rec.Vars, rec.Secrets = written.WrittenTo, written.Vars, written.Secrets
 	}
+	saveEnvRecord(home, envKey(root, in.Component), rec)
 	if len(stack.Commands) > 0 {
 		out["commands"] = stack.Commands
 	}
@@ -163,7 +163,8 @@ func (p *actionProxy) projectEnv(ctx context.Context, action string, params json
 			names = append(names, n)
 		}
 		sort.Strings(names)
-		out["mcp"] = map[string]any{"servers": names, "note": "declared, but not started by this covey version"}
+		out["mcp"] = map[string]any{"servers": names,
+			"note": "started beside you from your NEXT run on, if your access grants the dev scope mcp — a run takes its servers when it starts"}
 	}
 	out["next"] = envNext(action, stack)
 
@@ -290,7 +291,7 @@ func envNext(action string, stack recipe.Stack) string {
 	return strings.Join(steps, "; ") + ". A service is running before it accepts connections: wait for its port."
 }
 
-func (p *actionProxy) envStatus(ctx context.Context, home, root, component string) any {
+func (p *actionProxy) envStatus(ctx context.Context, home, root, component string, stack recipe.Stack) any {
 	resp, err := p.askHiring(ctx, RequestHiring{Op: "env_status", TaskID: p.taskID})
 	if err != nil {
 		return map[string]string{"status": "error", "error": err.Error()}
@@ -311,7 +312,116 @@ func (p *actionProxy) envStatus(ctx context.Context, home, root, component strin
 		out["env"] = nil
 		out["note"] = "env_up has not written an environment for this checkout yet"
 	}
+	if stack.App != nil {
+		out["app"] = probeApp(ctx, stack.App)
+	}
+	if control := controlURIs(home, stack.Start); len(control) > 0 {
+		out["control"] = control
+	}
 	return map[string]any{"status": "ok", "data": out}
+}
+
+// probeApp asks app.ready once. Once, and briefly: the agent decides how long
+// it waits, and an answer that took the whole deadline would say less than
+// "not yet".
+func probeApp(ctx context.Context, app *recipe.App) map[string]any {
+	out := map[string]any{"url": app.URL}
+	if app.Ready == "" {
+		out["ready"] = nil
+		out["detail"] = "the recipe declares no app.ready check"
+		return out
+	}
+	method, path, want, err := recipe.ParseReady(app.Ready)
+	if err != nil {
+		out["ready"], out["detail"] = false, err.Error()
+		return out
+	}
+	target := strings.TrimRight(app.URL, "/") + path
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, method, target, nil)
+	if err != nil {
+		out["ready"], out["detail"] = false, err.Error()
+		return out
+	}
+	// Straight to the application: it listens in this sandbox, and the egress
+	// proxy would only answer for it.
+	client := &http.Client{Transport: &http.Transport{Proxy: nil},
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	resp, err := client.Do(req)
+	if err != nil {
+		out["ready"], out["detail"] = false, "not answering yet: "+err.Error()
+		return out
+	}
+	resp.Body.Close()
+	out["ready"] = resp.StatusCode == want
+	out["detail"] = fmt.Sprintf("%s %s answered %d, the recipe expects %d", method, path, resp.StatusCode, want)
+	return out
+}
+
+// controlURIs reads, for every start entry with a control pattern, the latest
+// match out of that process's dev log (~/.covey/jobs/<name>.log). A Flutter
+// debug run prints a different VM service URI each time; the agent is handed
+// it instead of scraping it.
+func controlURIs(home string, start map[string]recipe.Process) map[string]any {
+	out := map[string]any{}
+	for name, proc := range start {
+		if proc.Control == "" {
+			continue
+		}
+		re, err := recipe.ControlPattern(proc.Control)
+		if err != nil {
+			continue
+		}
+		log, err := readTail(filepath.Join(home, ".covey", "jobs", jobLogName(name)+".log"), 512<<10)
+		if err != nil {
+			out[name] = map[string]any{"uri": nil, "detail": "no log yet — start it with dev start under the name " + name}
+			continue
+		}
+		all := re.FindAllStringSubmatch(string(log), -1)
+		if len(all) == 0 {
+			out[name] = map[string]any{"uri": nil, "detail": "the log does not show it yet"}
+			continue
+		}
+		last := all[len(all)-1]
+		uri := last[0]
+		if len(last) > 1 && last[1] != "" {
+			uri = last[1]
+		}
+		out[name] = map[string]any{"uri": uri}
+	}
+	return out
+}
+
+// jobLogName is the file name the dev plugin gives a job's log (dev/supervisor.go,
+// jobFileName): letters, digits, `-` and `_`, everything else a `-`.
+func jobLogName(name string) string {
+	safe := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			return r
+		}
+		return '-'
+	}, name)
+	return strings.Trim(safe, "-")
+}
+
+func readTail(path string, max int64) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if info.Size() > max {
+		if _, err := f.Seek(info.Size()-max, 0); err != nil {
+			return nil, err
+		}
+	}
+	return io.ReadAll(io.LimitReader(f, max))
 }
 
 // checkoutRoot resolves the checkout the agent names: the path from the
@@ -359,11 +469,35 @@ func stackDir(root, rel string) (string, error) {
 	return p, nil
 }
 
+// errNoRecipe: the checkout has neither a recipe nor a devcontainer that
+// names a compose file.
+var errNoRecipe = fmt.Errorf("this checkout has no %s at its root. It is the project's recipe (how it is installed, started and tested); "+
+	"without it there is nothing to set up from — write one as a merge request", recipe.FileName)
+
+// loadRecipe resolves what to set the project up from (spec/30, Resolution):
+// covey.project.yml, then the compose file a devcontainer names, then nothing.
+// There is no third step that guesses.
+func loadRecipe(root string) (*recipe.Recipe, string, bool, error) {
+	file := filepath.Join(root, recipe.FileName)
+	raw, err := readRecipe(file)
+	if err == nil {
+		r, err := recipe.Parse(raw)
+		return r, file, false, err
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return nil, "", false, err
+	}
+	r, dc, err := devcontainerRecipe(root)
+	if err != nil {
+		return nil, "", false, err
+	}
+	return r, dc, true, nil
+}
+
 func readRecipe(file string) ([]byte, error) {
 	info, err := os.Lstat(file)
 	if err != nil {
-		return nil, fmt.Errorf("this checkout has no %s at its root. It is the project's recipe (how it is installed, started and tested); "+
-			"without it there is nothing to set up from — write one as a merge request", recipe.FileName)
+		return nil, err
 	}
 	if !info.Mode().IsRegular() {
 		return nil, fmt.Errorf("%s is not a regular file", recipe.FileName)
@@ -441,4 +575,104 @@ func loadEnvRecord(home, key string) (envRecord, bool) {
 	}
 	var rec envRecord
 	return rec, json.Unmarshal(data, &rec) == nil
+}
+
+// devcontainerRecipe reads the one thing a devcontainer says that a recipe can
+// use: the compose file it names. Its image is not taken (the agent's workplace
+// is decided by its configuration, not by a repository), and its forwardPorts
+// are left to the agent's own reading.
+func devcontainerRecipe(root string) (*recipe.Recipe, string, error) {
+	var file string
+	for _, candidate := range []string{".devcontainer/devcontainer.json", ".devcontainer.json"} {
+		p := filepath.Join(root, filepath.FromSlash(candidate))
+		if info, err := os.Lstat(p); err == nil && info.Mode().IsRegular() {
+			file = p
+			break
+		}
+	}
+	if file == "" {
+		return nil, "", errNoRecipe
+	}
+	raw, err := os.ReadFile(file)
+	if err != nil {
+		return nil, "", err
+	}
+	var dc struct {
+		DockerComposeFile json.RawMessage `json:"dockerComposeFile"`
+	}
+	if err := json.Unmarshal(stripJSONC(raw), &dc); err != nil {
+		return nil, "", fmt.Errorf("%s is not readable: %v", file, err)
+	}
+	var compose []string
+	var one string
+	if json.Unmarshal(dc.DockerComposeFile, &one) == nil && one != "" {
+		compose = []string{one}
+	} else {
+		_ = json.Unmarshal(dc.DockerComposeFile, &compose)
+	}
+	switch len(compose) {
+	case 0:
+		return nil, "", fmt.Errorf("%s names no compose file, and there is no %s — nothing to set up from; write a recipe as a merge request", file, recipe.FileName)
+	case 1:
+	default:
+		return nil, "", fmt.Errorf("%s combines %d compose files; covey reads one — write a %s that names the services", file, len(compose), recipe.FileName)
+	}
+	abs := filepath.Join(filepath.Dir(file), filepath.FromSlash(compose[0]))
+	rel, err := filepath.Rel(root, abs)
+	if err != nil || !within(root, abs) {
+		return nil, "", fmt.Errorf("%s names a compose file outside the checkout", file)
+	}
+	return &recipe.Recipe{Version: 1, Stack: recipe.Stack{Compose: filepath.ToSlash(rel)}}, file, nil
+}
+
+// stripJSONC removes the comments and trailing commas devcontainer.json allows
+// and encoding/json does not, leaving strings untouched.
+func stripJSONC(in []byte) []byte {
+	out := make([]byte, 0, len(in))
+	inString, escaped := false, false
+	for i := 0; i < len(in); i++ {
+		c := in[i]
+		if inString {
+			out = append(out, c)
+			switch {
+			case escaped:
+				escaped = false
+			case c == '\\':
+				escaped = true
+			case c == '"':
+				inString = false
+			}
+			continue
+		}
+		switch {
+		case c == '"':
+			inString = true
+			out = append(out, c)
+		case c == '/' && i+1 < len(in) && in[i+1] == '/':
+			for i < len(in) && in[i] != '\n' {
+				i++
+			}
+			if i < len(in) {
+				out = append(out, '\n')
+			}
+		case c == '/' && i+1 < len(in) && in[i+1] == '*':
+			i += 2
+			for i+1 < len(in) && !(in[i] == '*' && in[i+1] == '/') {
+				i++
+			}
+			i++
+		case c == ',':
+			j := i + 1
+			for j < len(in) && (in[j] == ' ' || in[j] == '\t' || in[j] == '\n' || in[j] == '\r') {
+				j++
+			}
+			if j < len(in) && (in[j] == '}' || in[j] == ']') {
+				continue
+			}
+			out = append(out, c)
+		default:
+			out = append(out, c)
+		}
+	}
+	return out
 }

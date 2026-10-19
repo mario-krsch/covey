@@ -112,3 +112,59 @@ func TestTheRecipeSetsTheProjectUp(t *testing.T) {
 		t.Fatalf("the action must be recorded with the secret's name: %q", action)
 	}
 }
+
+// The recipe's MCP servers start from the next run on, and only with the dev
+// scope mcp; either way the recording says what happened (spec/30, #605).
+func TestRecipeMCPServersFollowTheGrant(t *testing.T) {
+	for _, tc := range []struct {
+		access  string
+		started bool
+	}{
+		{"- system: covey scope: services:write\n- system: dev scope: exec,mcp", true},
+		{"- system: covey scope: services:write\n- system: dev scope: exec", false},
+	} {
+		ctx := context.Background()
+		s := newStack(t)
+		agent := s.newSupportAgent("qa-mcp")
+		if _, err := s.registry.SaveConfig(ctx, agent.ID, map[string]string{
+			"SOUL.md": "# QA\n\n## Rolle\nNimmt ab.", "ACCESS.md": tc.access,
+		}, &s.adminID); err != nil {
+			t.Fatal(err)
+		}
+		checkout := filepath.Join(s.homeBase, agent.ID.String(), "repos", "app")
+		os.MkdirAll(checkout, 0o755)
+		// `sh` stands in for a server binary: it is on every PATH.
+		os.WriteFile(filepath.Join(checkout, "covey.project.yml"),
+			[]byte("version: 1\nmcp:\n  probe:\n    command: sh\n"), 0o644)
+
+		first, _ := s.backlog.Create(ctx, s.orgID, agent.ID, "aufsetzen",
+			`[mock:action covey/env_up {"checkout":"~/repos/app"}]`, "manual", 3)
+		waitFor(t, "env_up done", 40*time.Second, func() bool { return s.taskState(first.ID) == backlog.StateDone })
+		second, _ := s.backlog.Create(ctx, s.orgID, agent.ID, "testen", "[mock:prompt]", "manual", 3)
+		waitFor(t, "next run done", 40*time.Second, func() bool { return s.taskState(second.ID) == backlog.StateDone })
+
+		events, err := s.obs.Events(ctx, agent.ID, &second.ID, 0, 500)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var payload string
+		for _, e := range events {
+			if strings.Contains(string(e.Payload), "recipe_mcp") {
+				payload = string(e.Payload)
+			}
+		}
+		var got struct {
+			Started []struct{ Name string }   `json:"started"`
+			Left    []struct{ Reason string } `json:"left_out"`
+		}
+		if err := json.Unmarshal([]byte(payload), &got); err != nil {
+			t.Fatalf("%s: the run did not record its recipe servers: %q", tc.access, payload)
+		}
+		if tc.started && (len(got.Started) != 1 || got.Started[0].Name != "probe") {
+			t.Fatalf("with the grant the server must start: %s", payload)
+		}
+		if !tc.started && (len(got.Started) != 0 || len(got.Left) != 1 || !strings.Contains(got.Left[0].Reason, "mcp")) {
+			t.Fatalf("without the grant the server must be left out, named: %s", payload)
+		}
+	}
+}

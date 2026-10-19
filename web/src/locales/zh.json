@@ -782,7 +782,8 @@
         "dev-flutter": "dev · Flutter — 镜像内含 Flutter SDK、fvm、JDK",
         "dev-php": "dev · PHP — PHP 8.2、Composer、MariaDB",
         "dev-web": "dev · Web — node-gyp 工具链、chromium",
-        "dev-full": "dev · 全栈 — 全都有，含 Flutter SDK"
+        "dev-full": "dev · 全栈 — 全都有，含 Flutter SDK",
+        "dev-flutter-desktop": "dev · Flutter 桌面 — Flutter 加虚拟显示器、GTK、clang"
       },
       "sandboxImageMissing": "镜像 {{image}} 不在本组织的任何 runner 上——在它构建好之前，每一次唤醒都会失败。只需一次：{{build}}",
       "sandboxImageSource": {

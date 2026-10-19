@@ -148,3 +148,36 @@ func TestQuoting(t *testing.T) {
 		t.Errorf("ShellQuote: %s", got)
 	}
 }
+
+func TestControlFlutterFindsTheVMService(t *testing.T) {
+	re, err := ControlPattern(ControlFlutter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for line, want := range map[string]string{
+		"Launching lib/main.dart on Linux in debug mode...\nA Dart VM Service on Linux is available at: http://127.0.0.1:41235/Qx9c=/\n": "http://127.0.0.1:41235/Qx9c=/",
+		"An Observatory debugger and profiler on Linux is available at: http://127.0.0.1:8181/abc=/":                                     "http://127.0.0.1:8181/abc=/",
+	} {
+		m := re.FindStringSubmatch(line)
+		if m == nil || m[1] != want {
+			t.Errorf("%q: got %v", line, m)
+		}
+	}
+}
+
+func TestStageTwoValidation(t *testing.T) {
+	for name, raw := range map[string]string{
+		"bad ready":       "version: 1\napp: { url: http://localhost:80, ready: up }\n",
+		"bad control":     "version: 1\nstart: { app: { cmd: x, control: \"(\" } }\n",
+		"mcp named covey": "version: 1\nmcp: { covey: { command: x } }\n",
+		"mcp bad name":    "version: 1\nmcp: { Marionette: { command: x } }\n",
+	} {
+		if _, err := Parse([]byte(raw)); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	m, p, st, err := ParseReady("GET /health 204")
+	if err != nil || m != "GET" || p != "/health" || st != 204 {
+		t.Fatalf("ParseReady: %s %s %d %v", m, p, st, err)
+	}
+}

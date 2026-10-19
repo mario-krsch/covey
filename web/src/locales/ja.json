@@ -782,7 +782,8 @@
         "dev-flutter": "dev · Flutter — イメージに Flutter SDK、fvm、JDK",
         "dev-php": "dev · PHP — PHP 8.2、Composer、MariaDB",
         "dev-web": "dev · Web — node-gyp ツールチェーン、chromium",
-        "dev-full": "dev · フルスタック — すべて、Flutter SDK も含む"
+        "dev-full": "dev · フルスタック — すべて、Flutter SDK も含む",
+        "dev-flutter-desktop": "dev · Flutter デスクトップ — Flutter と仮想ディスプレイ、GTK、clang"
       },
       "sandboxImageMissing": "イメージ {{image}} はこの組織のどのランナーにもありません。ビルドされるまで、起こすたびに失敗します。一度だけ: {{build}}",
       "sandboxImageSource": {

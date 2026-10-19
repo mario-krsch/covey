@@ -255,22 +255,27 @@ jobs:
           done
           docker buildx imagetools inspect "${image}:${PROFILE}-latest"
 
-  # Stage 3: the all-rounder, which builds on `dev` and not on `base` — it is
-  # dev plus the Flutter SDK. Hence its own stage: its base has to be published
-  # before it can be built, and a matrix cannot express that ordering.
+  # Stage 3: the images that build on a stage-2 layer rather than on `base` —
+  # the all-rounder on `dev` (dev plus the Flutter SDK), the Flutter desktop
+  # workplace on `dev-flutter` (that role plus a display). Hence a stage of
+  # their own: their base has to be published before they can be built, and a
+  # matrix cannot express that ordering.
   #
-  # A list rather than one entry, so that a second image on top of dev needs a
-  # name here and nothing else. internal/sandbox knows which profiles those are
-  # (their Dockerfile says ARG BASE_IMAGE=covey-sandbox-dev:latest), and a test
-  # compares the two.
+  # Each profile names its base in `include`. internal/sandbox knows which
+  # profiles stand here and on what (their Dockerfile says ARG BASE_IMAGE=…),
+  # and a test compares the two.
   full:
     needs: layer-manifest
     strategy:
       fail-fast: false
       matrix:
-        profile: [dev-full]
+        profile: [dev-full, dev-flutter-desktop]
         arch: [amd64, arm64]
         include:
+          - profile: dev-full
+            base: dev
+          - profile: dev-flutter-desktop
+            base: dev-flutter
           - arch: amd64
             runner: ubuntu-latest
             platform: linux/amd64
@@ -281,14 +286,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - id: meta
+        env:
+          BASE: ${{ matrix.base }}
         run: |
           set -eu
           image=$(echo "$REGISTRY/$GITHUB_REPOSITORY-sandbox" | tr 'A-Z' 'a-z')
           echo "image=$image" >> "$GITHUB_OUTPUT"
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            echo "base=${image}:dev-$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+            echo "base=${image}:${BASE}-$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
           else
-            echo "base=${image}:dev-latest" >> "$GITHUB_OUTPUT"
+            echo "base=${image}:${BASE}-latest" >> "$GITHUB_OUTPUT"
           fi
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
@@ -325,7 +332,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        profile: [dev-full]
+        profile: [dev-full, dev-flutter-desktop]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -425,7 +432,7 @@ jobs:
           # union, then the roles. Whoever adds a profile here adds it there too —
           # otherwise this run publishes an
           # image no instance knows.
-          profiles="base dev dev-flutter dev-php dev-web dev-full"
+          profiles="base dev dev-flutter dev-php dev-web dev-full dev-flutter-desktop"
           digests=""
           for p in $profiles; do
             d=$(docker buildx imagetools inspect "${image}:${p}-${imgtag}" --format '{{ .Manifest.Digest }}')
@@ -470,11 +477,12 @@ jobs:
               "dev-php": "Base plus PHP 8.2 with the projects' extensions, Composer, a MariaDB to test against, and the node-gyp toolchain.",
               "dev-web": "Base plus the native build toolchain for npm packages — for Node and TypeScript projects.",
               "dev-full": "Every developer toolchain in one image, including the Flutter SDK — for an installation that would rather not split.",
+              "dev-flutter-desktop": "dev-flutter plus a display: the Linux desktop toolchain and Xvfb with software rendering, to run a Flutter application natively and operate it through its VM service.",
           }
           label = {"dev-flutter": "dev · Flutter", "dev-php": "dev · PHP", "dev-web": "dev · Web",
-                   "dev-full": "dev · Full stack"}
+                   "dev-full": "dev · Full stack", "dev-flutter-desktop": "dev · Flutter desktop"}
           digests = dict(t.split("=", 1) for t in digestliste.split())
-          reihenfolge = [n for n in ("base", "dev", "dev-flutter", "dev-php", "dev-web", "dev-full") if n in digests]
+          reihenfolge = [n for n in ("base", "dev", "dev-flutter", "dev-php", "dev-web", "dev-full", "dev-flutter-desktop") if n in digests]
 
           eintraege = {e["name"]: e for e in cat.get("workplaces", [])}
           for name in reihenfolge:

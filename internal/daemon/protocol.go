@@ -95,6 +95,10 @@ type InjectConfig struct {
 	// hand in the shell. An older daemon does not know the field and keeps to
 	// the curl route — both paths stay open.
 	ActionTools []ActionTool `json:"action_tools,omitempty"`
+	// RecipeMCP grants the stdio MCP servers of the agent's project recipes
+	// (`- system: dev scope: mcp`, spec/30). The control plane decides it from
+	// the agent's access; the daemon only reads the recipes.
+	RecipeMCP bool `json:"recipe_mcp,omitempty"`
 }
 
 // ActionTool is one target system as a callable tool: the name the action proxy

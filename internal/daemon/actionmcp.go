@@ -177,20 +177,32 @@ func mcpText(text string, isErr bool) map[string]any {
 	return out
 }
 
-// mcpConfig is the --mcp-config document for the runtime. Empty when there is
-// nothing to offer — then the runtime starts without an MCP server rather than
-// with an empty one.
-func (p *actionProxy) mcpConfig() string {
-	if !actionMCPEnabled() || len(p.tools) == 0 {
-		return ""
-	}
-	cfg := map[string]any{"mcpServers": map[string]any{
-		"covey": map[string]any{
+// mcpConfig is the --mcp-config document for the runtime with covey's own
+// server alone. Empty when there is nothing to offer — then the runtime starts
+// without an MCP server rather than with an empty one.
+func (p *actionProxy) mcpConfig() string { return p.mcpDocument(nil) }
+
+// mcpDocument is the --mcp-config document: covey's own server when the MCP
+// route is on, plus the stdio servers of the agent's project recipes
+// (recipemcp.go). The two are independent — a recipe's servers do not wait for
+// COVEY_ACTION_MCP, and covey's route does not depend on a recipe.
+func (p *actionProxy) mcpDocument(extra map[string]any) string {
+	servers := map[string]any{}
+	if actionMCPEnabled() && len(p.tools) > 0 {
+		servers["covey"] = map[string]any{
 			"type": "http",
 			"url":  "http://127.0.0.1:" + p.Port() + "/mcp",
-		},
-	}}
-	raw, err := json.Marshal(cfg)
+		}
+	}
+	for name, srv := range extra {
+		if name != "covey" {
+			servers[name] = srv
+		}
+	}
+	if len(servers) == 0 {
+		return ""
+	}
+	raw, err := json.Marshal(map[string]any{"mcpServers": servers})
 	if err != nil {
 		return ""
 	}

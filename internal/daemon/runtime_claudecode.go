@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -205,7 +206,7 @@ func (c *ClaudeCode) buildArgs(spec RunSpec) ([]string, string) {
 	allowed := spec.AllowedTools
 	if spec.MCPConfig != "" {
 		args = append(args, "--mcp-config", spec.MCPConfig)
-		allowed = append(append([]string{}, allowed...), "mcp__covey")
+		allowed = append(append([]string{}, allowed...), mcpAllowed(spec.MCPConfig)...)
 	}
 	if len(allowed) > 0 {
 		args = append(args, "--allowedTools", strings.Join(allowed, ","))
@@ -476,4 +477,22 @@ func (c *ClaudeCode) summarize(ctx context.Context, spec RunSpec, sessionID stri
 		return ""
 	}
 	return strings.TrimSpace(out.resultText)
+}
+
+// mcpAllowed is one allowlist entry per server in the MCP document: covey's own
+// and a project recipe's alike (recipemcp.go). Without the entry a headless run
+// would ask for permission on every call of that server's tools.
+func mcpAllowed(doc string) []string {
+	var cfg struct {
+		MCPServers map[string]json.RawMessage `json:"mcpServers"`
+	}
+	if json.Unmarshal([]byte(doc), &cfg) != nil {
+		return nil
+	}
+	names := make([]string, 0, len(cfg.MCPServers))
+	for name := range cfg.MCPServers {
+		names = append(names, "mcp__"+name)
+	}
+	sort.Strings(names)
+	return names
 }

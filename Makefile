@@ -12,7 +12,7 @@ LDFLAGS := -X covey/internal/buildinfo.version=$(VERSION) \
            -X covey/internal/buildinfo.commit=$(COMMIT) \
            -X covey/internal/buildinfo.date=$(DATE)
 
-.PHONY: build build-nopack web test test-integration run bootstrap dev-db sandbox-image sandbox-image-dev sandbox-image-dev-flutter sandbox-image-dev-php sandbox-image-dev-web sandbox-image-dev-full sandbox-images sandbox-images-pull upgrade runner egress-image clean skill-sync test-mobile mobile-locales eval-chat
+.PHONY: build build-nopack web test test-integration run bootstrap dev-db sandbox-image sandbox-image-dev sandbox-image-dev-flutter sandbox-image-dev-php sandbox-image-dev-web sandbox-image-dev-full sandbox-image-dev-flutter-desktop sandbox-images sandbox-images-pull upgrade runner egress-image clean skill-sync test-mobile mobile-locales eval-chat
 
 # npm ci instead of npm install — deliberately: it installs exactly the lockfile
 # and never rewrites it. npm install on macOS throws the Linux/wasm branches
@@ -98,6 +98,15 @@ sandbox-image-dev-full: sandbox-image-dev
 		--build-arg BASE_IMAGE=covey-sandbox-dev:latest \
 		-t covey-sandbox-dev-full:latest .
 
+# The Flutter role plus a display: the Linux desktop toolchain and Xvfb, so a
+# Flutter application runs natively and can be operated through its VM service
+# (spec/30). On dev-flutter, and NOT in `sandbox-images` below — an installation
+# without Flutter projects gets nothing from its ~900 MB.
+sandbox-image-dev-flutter-desktop: sandbox-image-dev-flutter
+	docker build -f Dockerfile.sandbox.dev-flutter-desktop \
+		--build-arg BASE_IMAGE=covey-sandbox-dev-flutter:latest \
+		-t covey-sandbox-dev-flutter-desktop:latest .
+
 # Every workplace at once — several gigabytes and the better part of an hour.
 # An installation rarely needs all of them: build the profiles your agents
 # actually stand in, or pull them (sandbox-images-pull).
@@ -113,7 +122,8 @@ sandbox-images: sandbox-image-dev sandbox-image-dev-flutter sandbox-image-dev-ph
 # SANDBOX_TAG picks the state: `latest` follows main, a release tag (v0.4.0)
 # fetches the images built for that release. Take the one your binary is.
 #
-# SANDBOX_PROFILES picks which ones: all of them by default, a subset where the
+# SANDBOX_PROFILES picks which ones: all but dev-flutter-desktop by default
+# (add it where Flutter applications are operated natively), a subset where the
 # agents stand in only one field (`make sandbox-images-pull
 # SANDBOX_PROFILES="base dev-flutter"`).
 SANDBOX_PKG ?= ghcr.io/benjaminledel/covey-sandbox

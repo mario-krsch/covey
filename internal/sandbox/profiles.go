@@ -139,6 +139,22 @@ func init() {
 		Build:      "make sandbox-image-dev-full",
 		Dockerfile: "Dockerfile.sandbox.dev-full",
 	})
+	// The role plus a display (spec/30): a Flutter application is operated
+	// through its VM service, and the extensions that need register only on a
+	// native target. On dev-flutter and not on base, because that is what it
+	// is; not in `make sandbox-images`, because it is only worth its size to an
+	// installation with Flutter projects.
+	Register(Profile{
+		Name:  "dev-flutter-desktop",
+		Label: "dev · Flutter desktop",
+		Description: "dev-flutter plus a display: the Linux desktop toolchain (clang, cmake, " +
+			"ninja, GTK 3) and Xvfb with software rendering, so a Flutter application runs " +
+			"natively and can be operated through its VM service — marionette, the Dart MCP " +
+			"server — rather than only built.",
+		Image:      "covey-sandbox-dev-flutter-desktop:latest",
+		Build:      "make sandbox-image-dev-flutter-desktop",
+		Dockerfile: "Dockerfile.sandbox.dev-flutter-desktop",
+	})
 }
 
 // All returns the registered profiles in registration order.

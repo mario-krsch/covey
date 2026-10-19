@@ -1,0 +1,25 @@
+{
+  "profile": "dev-flutter-desktop",
+  "summary": "The Flutter workplace plus a display: everything from dev-flutter, the Linux desktop toolchain, and a virtual screen rendered in software, so a Flutter application can be run natively and operated through its VM service.",
+  "tools": [
+    { "name": "flutter", "version": "3.47.2", "note": "the SDK from dev-flutter, in /opt/flutter, with the Linux engine already fetched: `flutter build linux` and `flutter run -d linux` work without a download. `flutter --version` is the authority on the version." },
+    { "name": "dart", "note": "the SDK's own; `dart mcp-server` is the Dart MCP server" },
+    { "name": "Xvfb", "note": "the virtual display. DISPLAY=:99 is already set; start the screen once per wake with dev start {\"name\":\"display\",\"cmd\":\"Xvfb :99 -screen 0 1280x800x24 -nolisten tcp\"}" },
+    { "name": "xvfb-run", "note": "for a one-off command that needs its own display, e.g. a test run" },
+    { "name": "xdpyinfo", "note": "answers once the display is up — check it before you start the application" },
+    { "name": "clang, cmake, ninja, pkg-config", "note": "the native toolchain a Linux desktop build needs, with GTK 3" },
+    { "name": "fvm", "version": "4.1.2", "note": "only for a project that pins another version" },
+    { "name": "openjdk", "version": "21", "note": "JAVA_HOME=/opt/java" },
+    { "name": "chromium", "note": "headless, for the browser plugin and the web target" }
+  ],
+  "sdk_dirs": {
+    "fvm": "~/fvm — only versions you asked for yourself",
+    "pub": "~/.pub-cache/bin is on the PATH, also for MCP servers the runtime starts: a tool activated with `dart pub global activate` is found there from your next run on"
+  },
+  "notes": [
+    "Run the application natively to operate it: `flutter run -d linux` as a dev job, after the display is up. The VM service URI it prints is what marionette or the Dart MCP server connect to; with a recipe, covey/env_status reports it for a start entry whose control is `flutter`.",
+    "There is no GPU. Rendering is Mesa in software — correct, and slower than on a developer's machine. Judge animations by their end state, not by their frame rate.",
+    "No Android SDK and no emulator: a sandbox gets no /dev/kvm. A device test is a case for a human.",
+    "You are not root and apt is not available to you. If a tool is missing, say so instead of building a way around it — that is a request, not a defeat."
+  ]
+}

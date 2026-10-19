@@ -711,7 +711,16 @@ tests are known to be red. When it is there, use it instead of the compose file:
      writes the environment again. The step after switching a checkout to
      another branch: a warm database does not know the branch changed. Then
      run the recipe's migrate and seed.
-   ` + "`covey/env_status`" + ` — what runs, and what was written where.
+   ` + "`covey/env_status`" + ` — what runs, what was written where, whether the
+     recipe's ` + "`app.ready`" + ` check passes right now (ask again rather than
+     clicking into an application that is not up), and under ` + "`control`" + ` the
+     address a tool connects to, read from a started process's log — for a
+     Flutter run its VM service URI, which changes every run.
+
+A recipe may also name MCP servers (` + "`mcp:`" + `, e.g. marionette for a Flutter
+application). If your access grants it, they are started beside you from the
+run after env_up, and their tools appear in your tool list; the answer of
+env_up says which.
 
 Secret values never reach you: the environment holds them, the answers name
 them. If env_up fails naming a secret, it is not stored for you — report it by

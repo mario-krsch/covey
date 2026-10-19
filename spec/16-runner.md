@@ -492,6 +492,7 @@ The image therefore belongs **on the agent** (D11 in [`07-open-decisions.md`](07
 | `dev-php` | + PHP 8.2, Composer, MariaDB, node-gyp | PHP/Laravel agents |
 | `dev-web` | + node-gyp toolchain | Node/TypeScript agents |
 | `dev-full` | + all of the above, Flutter SDK included | an installation that would rather not split |
+| `dev-flutter-desktop` | `dev-flutter` + clang, cmake, ninja, GTK 3, Xvfb, Mesa | Flutter agents that operate the application natively ([`30-project-recipes.md`](30-project-recipes.md)) |
 | org-owned | anything | special cases, tighter sandboxes |
 
 Measured on arm64: `base` 1.54 GB, `dev` 2.53, `dev-flutter` 3.21, `dev-php` 2.12, `dev-web` 1.82, `dev-full` 3.89 GB.

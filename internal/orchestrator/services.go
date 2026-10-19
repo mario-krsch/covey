@@ -400,3 +400,30 @@ func (o *Orchestrator) recordServiceRequest(
 func (o *Orchestrator) mayStartServices(ctx context.Context, agent agents.Agent) bool {
 	return o.mayUsecovey(ctx, agent, scopeServices)
 }
+
+// mayRunRecipeMCP: the stdio MCP servers of the agent's project recipes are
+// started only with `- system: dev scope: mcp` (spec/30). Plugin scopes are
+// not checked per action, so this one is checked where it can be — here,
+// where the run's configuration is built. Not folded into exec: with exec the
+// agent runs a command it names, here the platform starts a server before the
+// first turn.
+func (o *Orchestrator) mayRunRecipeMCP(ctx context.Context, agent agents.Agent) bool {
+	if o.Registry == nil {
+		return false
+	}
+	accesses, err := o.Registry.Accesses(ctx, agent.ID)
+	if err != nil {
+		return false
+	}
+	for _, a := range accesses {
+		if a.System != "dev" {
+			continue
+		}
+		for _, scope := range a.Scopes {
+			if strings.EqualFold(strings.TrimSpace(scope), "mcp") {
+				return true
+			}
+		}
+	}
+	return false
+}
