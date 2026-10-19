@@ -632,7 +632,7 @@ Partial is normal on this path, and that is the difference from the declared set
 
 The subset that is read: `image`, `environment` (both spellings compose allows), and nothing else. `build:` marks a service as the project's own. A host bind mount, `privileged`, `cap_add`, `devices`, a foreign `network_mode` or `pid` namespace each cost that one service its place, with the reason — those are the keys that would turn a service into a way onto the runner.
 
-A third source, the project's own recipe, brings a second kind of service with it — shared by the agents on one project, outliving the sandbox, with a database per agent — and is specified in [`30-projects-environments.md`](30-projects-environments.md). The services described here stay as they are beside it.
+A third source is the project's own recipe, `covey.project.yml`, read by the daemon from the agent's checkout ([`30-project-recipes.md`](30-project-recipes.md)). The services it names are these services, unchanged: per agent, scratch, and through the same allowlist.
 
 The runner protocol stays **indifferent to where the list came from**: `start_sandbox` carries services and `add_services` brings them to a sandbox that is already up. Nothing in the data plane knows whether an agent, a manager or a compose file named them.
 
