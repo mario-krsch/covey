@@ -717,6 +717,16 @@ tests are known to be red. When it is there, use it instead of the compose file:
      address a tool connects to, read from a started process's log — for a
      Flutter run its VM service URI, which changes every run.
 
+   ` + "`covey/env_install`" + ` — runs the recipe's ` + "`commands.install`" + ` as a job with
+     the registry credentials its ` + "`install_env`" + ` names (an npm token,
+     COMPOSER_AUTH), given to the install alone; ` + "`env_status`" + ` reports it with
+     the tail of its log. Use it instead of dev exec when the recipe has
+     install_env.
+
+A git dependency on a host one of your target systems lives on needs nothing
+from you: git asks covey for that system's credential (GIT_ASKPASS), and a
+refusal says which hosts were checked.
+
 A recipe may also name MCP servers (` + "`mcp:`" + `, e.g. marionette for a Flutter
 application). If your access grants it, they are started beside you from the
 run after env_up, and their tools appear in your tool list; the answer of

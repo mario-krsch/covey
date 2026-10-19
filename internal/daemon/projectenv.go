@@ -84,6 +84,9 @@ func (p *actionProxy) projectEnv(ctx context.Context, action string, params json
 	if action == "env_status" {
 		return p.envStatus(ctx, home, root, in.Component, stack)
 	}
+	if action == "env_install" {
+		return p.envInstall(ctx, home, root, dir, in.Component, stack)
+	}
 
 	// The control plane first: it holds the gate (scope, guard rails), so
 	// nothing is fetched or written for an agent that may not do this.
@@ -278,9 +281,14 @@ func envNext(action string, stack recipe.Stack) string {
 		steps = append(steps, "the services are empty now")
 	}
 	for _, c := range []string{"install", "migrate", "seed"} {
-		if _, ok := stack.Commands[c]; ok && (action == "env_up" || c != "install") {
-			steps = append(steps, "run commands."+c)
+		if _, ok := stack.Commands[c]; !ok || (action != "env_up" && c == "install") {
+			continue
 		}
+		if c == "install" && len(stack.InstallEnv) > 0 {
+			steps = append(steps, "run commands.install through covey/env_install (it carries the registry credentials; dev exec would not)")
+			continue
+		}
+		steps = append(steps, "run commands."+c)
 	}
 	if len(stack.Start) > 0 {
 		steps = append(steps, "start each entry of `start` with dev start using its dev_start parameters")
@@ -317,6 +325,9 @@ func (p *actionProxy) envStatus(ctx context.Context, home, root, component strin
 	}
 	if control := controlURIs(home, stack.Start); len(control) > 0 {
 		out["control"] = control
+	}
+	if inst := lastInstall(home, envKey(root, component)); inst != nil {
+		out["install"] = inst
 	}
 	return map[string]any{"status": "ok", "data": out}
 }

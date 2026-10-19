@@ -603,6 +603,15 @@ func (c *Client) runTask(ctx context.Context, task AssignTask) {
 	// calls fail with a refused connection, which at least says what happened.
 	os.Setenv("COVEY_ACTION_PORT", proxy.Port())
 	defer os.Unsetenv("COVEY_ACTION_PORT")
+	// git's credential route the same way, for the runtime and for every
+	// process dev starts (askpass.go). No terminal prompt: there is no
+	// terminal, and a clone would wait for one until its timeout.
+	if helper := askpassHelper(); helper != "" {
+		os.Setenv("GIT_ASKPASS", helper)
+		os.Setenv("GIT_TERMINAL_PROMPT", "0")
+		defer os.Unsetenv("GIT_ASKPASS")
+		defer os.Unsetenv("GIT_TERMINAL_PROMPT")
+	}
 	// Engines that take their credential as a file get it for this run only.
 	defer c.writeCredentialFile()()
 

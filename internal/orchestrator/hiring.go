@@ -110,6 +110,10 @@ var coveyOps = map[string]coveyOp{
 	"env_up":     {Subject: "covey:env_up", Scopes: []string{scopeServices}},
 	"env_reset":  {Subject: "covey:env_reset", Scopes: []string{scopeServices}},
 	"env_status": {Subject: "covey:env_status", Scopes: []string{scopeServices}},
+	// The install with the recipe's registry credentials (#606): the daemon
+	// runs it, this only gates it — scope and guard rails before a secret is
+	// fetched.
+	"env_install": {Subject: "covey:env_install", Scopes: []string{scopeServices}},
 
 	// Text as a platform service (styleservice.go): no scope, like the wiki.
 	// Measuring a text changes nothing; revising one costs the organisation's
@@ -283,6 +287,8 @@ func (o *Orchestrator) hiring(ctx context.Context, agent agents.Agent, taskID uu
 		return o.recipeServices(ctx, agent, taskID, req, false, ok, fail)
 	case "env_reset":
 		return o.recipeServices(ctx, agent, taskID, req, true, ok, fail)
+	case "env_install":
+		return ok(map[string]string{"state": "allowed"})
 	case "style_check":
 		return o.styleCheckAction(ctx, agent, taskID, req, ok, fail)
 	case "style_apply":

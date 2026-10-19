@@ -168,3 +168,49 @@ func TestRecipeMCPServersFollowTheGrant(t *testing.T) {
 		}
 	}
 }
+
+// The install gets the registry credential, and only the install (#606).
+func TestEnvInstallCarriesTheRegistryCredential(t *testing.T) {
+	ctx := context.Background()
+	s := newStack(t)
+	agent := s.newSupportAgent("qa-install")
+	if _, err := s.registry.SaveConfig(ctx, agent.ID, map[string]string{
+		"SOUL.md": "# QA\n\n## Rolle\nNimmt ab.", "ACCESS.md": "- system: covey scope: services:write",
+	}, &s.adminID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.secrets.PutAgent(ctx, s.orgID, agent.ID, "npm_token", "npm-tok-789"); err != nil {
+		t.Fatal(err)
+	}
+	home := filepath.Join(s.homeBase, agent.ID.String())
+	checkout := filepath.Join(home, "repos", "web")
+	os.MkdirAll(checkout, 0o755)
+	os.WriteFile(filepath.Join(checkout, "covey.project.yml"), []byte(`version: 1
+secrets: [npm_token]
+install_env: { NPM_TOKEN: "{{ secret.npm_token }}" }
+commands:
+  install: test -n "$NPM_TOKEN" && echo "token $NPM_TOKEN" > /dev/null && echo installed
+`), 0o644)
+
+	task, _ := s.backlog.Create(ctx, s.orgID, agent.ID, "installieren",
+		`[mock:action covey/env_install {"checkout":"~/repos/web"}]`, "manual", 3)
+	waitFor(t, "task done", 40*time.Second, func() bool { return s.taskState(task.ID) == backlog.StateDone })
+
+	var status map[string]any
+	waitFor(t, "install finished", 20*time.Second, func() bool {
+		raw, err := os.ReadFile(filepath.Join(home, ".covey", "env", "web.install.json"))
+		if err != nil || json.Unmarshal(raw, &status) != nil {
+			return false
+		}
+		return status["state"] != "running"
+	})
+	if status["state"] != "succeeded" {
+		t.Fatalf("the install did not get its credential: %+v", status)
+	}
+	events, _ := s.obs.Events(ctx, agent.ID, &task.ID, 0, 500)
+	for _, e := range events {
+		if strings.Contains(string(e.Payload), "npm-tok-789") {
+			t.Fatalf("the credential reached the recording: %s", e.Payload)
+		}
+	}
+}

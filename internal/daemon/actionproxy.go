@@ -37,6 +37,11 @@ type actionProxy struct {
 	// askHiring sends a meta action to the control plane. Defaults to
 	// client.hiring; tests set a stub, like fetchSecret.
 	askHiring func(ctx context.Context, req RequestHiring) (InjectHiring, error)
+	// brokerCredential and decide are the credential and guard-rail round
+	// trips the askpass route uses (askpass.go). Default to the client's;
+	// tests set stubs.
+	brokerCredential func(ctx context.Context, system string) (InjectCredentials, error)
+	decide           func(ctx context.Context, taskID, action string, params json.RawMessage) (ApprovalDecision, error)
 }
 
 func (c *Client) startActionProxy(ctx context.Context, taskID string, tools []ActionTool) (*actionProxy, error) {
@@ -44,12 +49,18 @@ func (c *Client) startActionProxy(ctx context.Context, taskID string, tools []Ac
 	if err != nil {
 		return nil, err
 	}
-	p := &actionProxy{client: c, taskID: taskID, ln: ln, tools: tools, fetchSecret: c.secret, askHiring: c.hiring}
+	p := &actionProxy{client: c, taskID: taskID, ln: ln, tools: tools, fetchSecret: c.secret, askHiring: c.hiring,
+		decide: c.checkAction}
+	p.brokerCredential = func(ctx context.Context, system string) (InjectCredentials, error) {
+		return c.credential(ctx, system, taskID)
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /actions/{system}/{action}", p.handle)
 	// The same actions once more as MCP tools — one door onto the same room
 	// (see actionmcp.go for why).
 	mux.HandleFunc("POST /mcp", p.handleMCP)
+	// git asks here for a repository credential (askpass.go).
+	mux.HandleFunc("POST /askpass", p.handleAskpass)
 	p.srv = &http.Server{
 		Handler:     mux,
 		BaseContext: func(net.Listener) context.Context { return ctx },
@@ -294,7 +305,7 @@ func (p *actionProxy) controlPlane(ctx context.Context, action string, params js
 		audit, _ := json.Marshal(map[string]any{"action": "covey:set_stage", "stage": in.Stage})
 		_ = p.client.send(TypeEvent, Event{TaskID: p.taskID, Kind: "action", Payload: audit})
 		return map[string]string{"status": "ok", "stage": in.Stage}
-	case "env_up", "env_reset", "env_status":
+	case "env_up", "env_reset", "env_status", "env_install":
 		// The project recipe (spec/30, projectenv.go): read and written here,
 		// in the sandbox; decided in the control plane.
 		return p.projectEnv(ctx, action, params)

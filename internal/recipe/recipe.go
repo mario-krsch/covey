@@ -54,15 +54,19 @@ type Component struct {
 // Stack is what one stack declares. The flat form is a single stack at the
 // repository root.
 type Stack struct {
-	Compose  string               `yaml:"compose"`
-	Services []Service            `yaml:"services"`
-	Secrets  []string             `yaml:"secrets"`
-	Env      *Env                 `yaml:"env"`
-	Commands map[string]string    `yaml:"commands"`
-	Start    map[string]Process   `yaml:"start"`
-	App      *App                 `yaml:"app"`
-	MCP      map[string]MCPServer `yaml:"mcp"`
-	Baseline *Baseline            `yaml:"baseline"`
+	Compose  string            `yaml:"compose"`
+	Services []Service         `yaml:"services"`
+	Secrets  []string          `yaml:"secrets"`
+	Env      *Env              `yaml:"env"`
+	Commands map[string]string `yaml:"commands"`
+	// InstallEnv is given to commands.install alone, when covey/env_install
+	// runs it: registry credentials (NPM_TOKEN for an .npmrc that reads
+	// ${NPM_TOKEN}, COMPOSER_AUTH), secrets by name. Never written to a file.
+	InstallEnv map[string]string    `yaml:"install_env"`
+	Start      map[string]Process   `yaml:"start"`
+	App        *App                 `yaml:"app"`
+	MCP        map[string]MCPServer `yaml:"mcp"`
+	Baseline   *Baseline            `yaml:"baseline"`
 }
 
 // Service is a service declared in the recipe, in the shape services beside
@@ -198,7 +202,7 @@ func (r *Recipe) validate() error {
 }
 
 func (s *Stack) empty() bool {
-	return s.Compose == "" && len(s.Services) == 0 && len(s.Secrets) == 0 && s.Env == nil &&
+	return s.Compose == "" && len(s.Services) == 0 && len(s.Secrets) == 0 && s.Env == nil && len(s.InstallEnv) == 0 &&
 		len(s.Commands) == 0 && len(s.Start) == 0 && s.App == nil && len(s.MCP) == 0 && s.Baseline == nil
 }
 
@@ -235,6 +239,19 @@ func (s *Stack) validate() error {
 		if err := s.Env.validate(declared); err != nil {
 			return fmt.Errorf("env: %w", err)
 		}
+	}
+	for k, v := range s.InstallEnv {
+		if !envKey.MatchString(k) {
+			return fmt.Errorf("install_env: %q is not an environment variable name", k)
+		}
+		for _, m := range secretRef.FindAllStringSubmatch(v, -1) {
+			if !declared[m[1]] {
+				return fmt.Errorf("install_env.%s names the secret %q, which is not listed under `secrets:`", k, m[1])
+			}
+		}
+	}
+	if len(s.InstallEnv) > 0 && strings.TrimSpace(s.Commands["install"]) == "" {
+		return errors.New("install_env without commands.install — it is given to the install and nothing else")
 	}
 	for name, cmd := range s.Commands {
 		if !entryName.MatchString(name) {
@@ -394,8 +411,15 @@ func (s *Stack) SecretNames() []string {
 	if s.Env == nil {
 		return nil
 	}
+	return referenced(s.Env.Vars)
+}
+
+// InstallSecretNames are the secrets install_env references, sorted.
+func (s *Stack) InstallSecretNames() []string { return referenced(s.InstallEnv) }
+
+func referenced(vars map[string]string) []string {
 	seen := map[string]bool{}
-	for _, v := range s.Env.Vars {
+	for _, v := range vars {
 		for _, m := range secretRef.FindAllStringSubmatch(v, -1) {
 			seen[m[1]] = true
 		}

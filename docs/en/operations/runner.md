@@ -369,6 +369,11 @@ environment, `covey/env_reset` recreates the services empty after a branch
 change. A secret the recipe names has to be stored for the agent, or assigned
 to it, under exactly that key; `covey:env_up` and `covey:env_reset` are
 guard-rail subjects of their own if you want a human in the loop.
+Private dependencies: a `git:` dependency on a host one of the agent's target
+systems lives on is cloned with that system's credential through
+`GIT_ASKPASS` (subject `<system>:git_credential`, recorded per call), and
+`covey/env_install` runs the recipe's install with the npm or Composer
+credentials its `install_env` names, in that process only.
 
 Useful to know when you read such a run: the project's own application is
 normally *skipped*, because it is built from the source the agent has and

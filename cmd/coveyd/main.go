@@ -24,6 +24,12 @@ func main() {
 	// actually sits in the container.
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "askpass":
+			// git calls this through GIT_ASKPASS with its prompt as the last
+			// argument; the answer goes to stdout (internal/daemon/askpass.go).
+			// A subcommand rather than a second binary: it has to be in every
+			// image, and one artefact cannot drift from itself.
+			os.Exit(daemon.Askpass(os.Args[len(os.Args)-1]))
 		case "version", "--version", "-v":
 			fmt.Println("coveyd " + buildinfo.String())
 			// The same note as with covey: one work, one licence.

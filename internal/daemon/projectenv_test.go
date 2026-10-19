@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 const testRecipe = `version: 1
@@ -285,5 +286,87 @@ func TestEnvStatusProbesTheAppAndReadsTheControlURI(t *testing.T) {
 	st = h.run(t, "env_status", map[string]string{"checkout": h.checkout})["data"].(map[string]any)
 	if st["app"].(map[string]any)["ready"] != false {
 		t.Fatalf("a closed app must not pass: %+v", st["app"])
+	}
+}
+
+const installRecipe = `version: 1
+secrets: [npm_token]
+install_env:
+  NPM_TOKEN: "{{ secret.npm_token }}"
+commands:
+  install: echo "using $NPM_TOKEN"; echo "action port ${COVEY_ACTION_PORT:-none} daemon ${COVEY_DAEMON_TOKEN:-none}"; echo done
+`
+
+func waitInstall(t *testing.T, h *envHarness, want string) map[string]any {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		st := h.run(t, "env_status", map[string]string{"checkout": h.checkout})["data"].(map[string]any)
+		if inst, ok := st["install"].(map[string]any); ok && inst["install"].(map[string]any)["state"] == want {
+			return inst
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("install never reached %q: %+v", want, st["install"])
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestEnvInstallGivesTheCredentialToTheInstallAlone(t *testing.T) {
+	t.Setenv("COVEY_DAEMON_TOKEN", "daemon-secret")
+	t.Setenv("COVEY_ACTION_PORT", "4711")
+	h := newEnvHarness(t, installRecipe, map[string]InjectSecret{"npm_token": {Granted: true, Value: "npm-tok-123"}})
+
+	got := h.run(t, "env_install", map[string]string{"checkout": h.checkout})
+	if got["status"] != "ok" {
+		t.Fatalf("env_install: %+v", got)
+	}
+	if len(h.asked) != 1 || h.asked[0].Op != "env_install" {
+		t.Fatalf("the control plane must gate the install: %+v", h.asked)
+	}
+	inst := waitInstall(t, h, "succeeded")
+	tail := inst["log_tail"].(string)
+	if strings.Contains(tail, "npm-tok-123") || !strings.Contains(tail, "using [secret]") {
+		t.Fatalf("the secret value must be masked in the log:\n%s", tail)
+	}
+	if !strings.Contains(tail, "action port 4711 daemon none") {
+		t.Fatalf("the install gets the action port and not the daemon's credentials:\n%s", tail)
+	}
+	// Nothing with the value is left in the home.
+	filepath.Walk(h.home, func(path string, info os.FileInfo, err error) error {
+		if err == nil && info.Mode().IsRegular() {
+			if b, _ := os.ReadFile(path); strings.Contains(string(b), "npm-tok-123") {
+				t.Errorf("the credential was written to %s", path)
+			}
+		}
+		return nil
+	})
+}
+
+func TestEnvInstallRunsOnceAtATimeAndReportsFailure(t *testing.T) {
+	h := newEnvHarness(t, "version: 1\ncommands:\n  install: sleep 0.3; exit 3\n", nil)
+	first := h.run(t, "env_install", map[string]string{"checkout": h.checkout})
+	second := h.run(t, "env_install", map[string]string{"checkout": h.checkout})
+	if first["status"] != "ok" || second["data"].(map[string]any)["note"] == nil {
+		t.Fatalf("a second install while one runs must report the running one: %+v", second)
+	}
+	inst := waitInstall(t, h, "failed")["install"].(map[string]any)
+	if inst["exit_code"].(float64) != 3 {
+		t.Fatalf("exit code: %+v", inst)
+	}
+}
+
+func TestEnvInstallFetchesNothingWhenRefused(t *testing.T) {
+	fetched := false
+	h := newEnvHarness(t, installRecipe, nil)
+	h.p.fetchSecret = func(context.Context, string, string) (InjectSecret, error) {
+		fetched = true
+		return InjectSecret{Granted: true}, nil
+	}
+	h.p.askHiring = func(context.Context, RequestHiring) (InjectHiring, error) {
+		return InjectHiring{Error: "no access"}, nil
+	}
+	if got := h.run(t, "env_install", map[string]string{"checkout": h.checkout}); got["status"] != "error" || fetched {
+		t.Fatalf("refused: %+v, fetched %v", got, fetched)
 	}
 }
