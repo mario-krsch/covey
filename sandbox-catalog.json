@@ -8,7 +8,7 @@
       "images": [
         {
           "covey_version": "main",
-          "ref": "ghcr.io/benjaminledel/covey-sandbox@sha256:e5fe72edcf7cd258eafb4b4b1d284ab3b1a3594d2fbe1a5881c212e3eeeacecf",
+          "ref": "ghcr.io/mario-krsch/covey-sandbox@sha256:d2db9c1a5eaa9d782552178ed1d9871235859c5d71f988c6e32fb5ab1ac79a23",
           "tag": "base-latest",
           "platforms": [
             "linux/amd64",
@@ -195,7 +195,7 @@
       "images": [
         {
           "covey_version": "main",
-          "ref": "ghcr.io/benjaminledel/covey-sandbox@sha256:354fd74e7467121e670126a3bd450742584f94e4b5d416f2c27d55de90ddd6ec",
+          "ref": "ghcr.io/mario-krsch/covey-sandbox@sha256:70982b8628bd83cf4f37545525abd8111b6aec53ccd04364884d18bbc4ee5fd9",
           "tag": "dev-latest",
           "platforms": [
             "linux/amd64",
@@ -382,7 +382,7 @@
       "images": [
         {
           "covey_version": "main",
-          "ref": "ghcr.io/benjaminledel/covey-sandbox@sha256:8fa595d69d68454673ad7ad4a30e497102db5171e1a1faf871cc85296e205875",
+          "ref": "ghcr.io/mario-krsch/covey-sandbox@sha256:a8ee0acf34b1949b8bd0a6377a1873dab04a7633146fad0dda86087b3c7a27ec",
           "tag": "dev-flutter-latest",
           "platforms": [
             "linux/amd64",
@@ -497,7 +497,7 @@
       "images": [
         {
           "covey_version": "main",
-          "ref": "ghcr.io/benjaminledel/covey-sandbox@sha256:684fb2bb64a6bb3ccc4d39c962c6d36e832db166cbc6759aea23b276ee93cc27",
+          "ref": "ghcr.io/mario-krsch/covey-sandbox@sha256:84b7fd3314c5ea8442318d4d4dd67c46da0f94947f1fdfee8ef0baccfed3d8e6",
           "tag": "dev-php-latest",
           "platforms": [
             "linux/amd64",
@@ -606,13 +606,29 @@
       ]
     },
     {
+      "name": "dev-php84",
+      "label": "dev \u00b7 PHP 8.4",
+      "description": "The same as dev-php with PHP 8.4 \u2014 for projects whose CI and lock file require 8.4.",
+      "images": [
+        {
+          "covey_version": "main",
+          "ref": "ghcr.io/mario-krsch/covey-sandbox@sha256:d7bb7f849b14150800987eca2d2ed35638143fd0d357a83e686af94bff442e0a",
+          "tag": "dev-php84-latest",
+          "platforms": [
+            "linux/amd64",
+            "linux/arm64"
+          ]
+        }
+      ]
+    },
+    {
       "name": "dev-web",
       "label": "dev \u00b7 Web",
       "description": "Base plus the native build toolchain for npm packages \u2014 for Node and TypeScript projects.",
       "images": [
         {
           "covey_version": "main",
-          "ref": "ghcr.io/benjaminledel/covey-sandbox@sha256:2c298fe80c002a2bb3b5aaacdcce35f4c54d1b7d7e7599b1eda4452c473f5c09",
+          "ref": "ghcr.io/mario-krsch/covey-sandbox@sha256:40163ee3a6070ff5c702b0a80cfc216263243a9571e618da4d4257e0c6cf67b3",
           "tag": "dev-web-latest",
           "platforms": [
             "linux/amd64",
@@ -727,7 +743,7 @@
       "images": [
         {
           "covey_version": "main",
-          "ref": "ghcr.io/benjaminledel/covey-sandbox@sha256:747ef2911b755c5415159438b1467959045e8763362c554d673cc989c57cd831",
+          "ref": "ghcr.io/mario-krsch/covey-sandbox@sha256:72ff5218b1d0fe2e4f40812061f54700d5da306a5197f2616ee5129c27865372",
           "tag": "dev-full-latest",
           "platforms": [
             "linux/amd64",
@@ -836,5 +852,5 @@
       ]
     }
   ],
-  "generated_at": "2026-10-19T12:06:42Z"
+  "generated_at": "2026-11-27T09:50:02Z"
 }
